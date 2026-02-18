@@ -320,6 +320,26 @@ ingesta sync \
   --prefix "synced_"
 ```
 
+With sync source selection (you will be prompted if not specified):
+
+```bash
+ingesta sync \
+  --video-dir ./video \
+  --audio-dir ./audio \
+  --output-dir ./synced \
+  --sync-source auto
+ingesta sync \
+  --video-dir ./video \
+  --audio-dir ./audio \
+  --output-dir ./synced \
+  --sync-source waveform
+ingesta sync \
+  --video-dir ./video \
+  --audio-dir ./audio \
+  --output-dir ./synced \
+  --sync-source timecode
+```
+
 ### Create Premiere Project
 
 Create a Premiere Pro project with synced media:
@@ -492,9 +512,16 @@ Options:
   --video-dir PATH    Directory containing video files (required)
   --audio-dir PATH    Directory containing audio files (required)
   --output-dir PATH   Output directory for synced files (required)
-  --tolerance FLOAT   Sync tolerance in seconds (default: 0.3)
+  --tolerance FLOAT   Sync tolerance in seconds (default: 0.5)
   --prefix TEXT       Prefix for output filenames
-  --method TEXT       Sync method: waveform, timecode (default: waveform)
+  --sync-source TEXT  Sync source: auto, timecode, waveform (prompted if not specified)
+
+Sync Sources:
+  auto        Automatically detect best sync method (recommended)
+  timecode    Use SMPTE timecode (HH:MM:SS:FF) for synchronization
+              The primary audio mixing timecode format used by audio engineers
+              who jam sync devices on set
+  waveform    Use audio waveform matching via cross-correlation
 ```
 
 ### Premiere Command
