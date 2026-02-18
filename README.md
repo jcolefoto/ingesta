@@ -431,6 +431,105 @@ Commands:
     --include-all-offloads      Include analysis of all media from project
 ```
 
+### TUI Workflow
+
+Interactive step-by-step workflow for guided media ingestion:
+
+```bash
+# Run complete workflow
+ingesta tui
+
+# Individual steps
+ingesta tui --step project      # Create/select project
+ingesta tui --step offload      # Offload media
+ingesta tui --step report       # Generate reports
+ingesta tui --step deliverables # Package deliverables
+```
+
+### Project Templates
+
+Predefined templates for common production types:
+
+```bash
+# List available templates
+ingesta template list
+
+# Show template details
+ingesta template show documentary
+ingesta template show commercial
+ingesta template show wedding
+
+# Export template to JSON
+ingesta template export documentary -o doc_template.json
+```
+
+Available templates:
+- **Documentary**: Interviews, B-roll, verité, archival organization
+- **Commercial**: Product, talent, lifestyle, VFX bins
+- **Wedding**: Preparation, ceremony, reception, portraits
+- **Corporate**: Interviews, testimonials, workplace footage
+- **Music Video**: Performance, narrative, VFX organization
+
+### NLE Exports
+
+Export to professional editing systems:
+
+```bash
+# Export to all formats
+ingesta export -m ./media -o ./exports -n "Project_001"
+
+# Export specific formats
+ingesta export -m ./media -o ./exports -n "Project" -f premiere -f edl
+
+# Use template for bin organization
+ingesta export -m ./media -o ./exports -n "Project" --template documentary
+```
+
+Supported formats:
+- **Premiere Pro** (.prproj) - Bins, markers, timecode
+- **DaVinci Resolve** (.xml) - Color tags, timeline
+- **Final Cut Pro** (.fcpxml) - Modern FCPX format
+- **EDL** (.edl) - CMX3600 universal format
+
+### Client Deliverables
+
+Package professional deliverable ZIP archives:
+
+```bash
+# Create deliverable package (during TUI workflow)
+ingesta tui  # Includes deliverable packaging in step 4
+
+# Package contents:
+# - 01_REPORTS/ - PDF and CSV reports
+# - 02_PROXIES/ - Editing-friendly proxy files
+# - 03_TRANSCRIPTS/ - TXT, SRT, and JSON transcripts
+# - 04_THUMBNAILS/ - Clip thumbnails
+# - 05_METADATA/ - JSON metadata and manifest
+# - README.txt - Package documentation
+```
+
+### Audit Logging
+
+Chain-of-custody tracking with tamper-evident logs:
+
+```bash
+# View audit log
+ingesta audit show --project PROJECT_ID
+
+# Verify chain integrity
+ingesta audit verify --project PROJECT_ID
+
+# Export audit log
+ingesta audit export --project PROJECT_ID -o audit.json
+```
+
+Features:
+- Immutable timestamped entries
+- File checksums at each operation
+- Hash chain for tamper detection
+- User and system tracking
+- Legal/professional compliance ready
+
 ## Project Structure
 
 ```
@@ -444,6 +543,11 @@ ingesta/
 │   ├── analysis.py      # Content analysis & classification
 │   ├── cli.py           # Command-line interface
 │   ├── project_manager.py  # Project and shoot day management
+│   ├── tui.py           # Interactive TUI workflow
+│   ├── templates.py     # Project templates (doc/commercial/wedding)
+│   ├── exports.py       # NLE exports (Premiere/Resolve/FCP/EDL)
+│   ├── deliverables.py  # Client deliverable packaging
+│   ├── audit.py         # Chain-of-custody audit logging
 │   └── reports/         # Report generation
 │       ├── __init__.py
 │       ├── xml_parser.py          # Camera XML sidecar parser
