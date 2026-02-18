@@ -15,7 +15,8 @@ A professional-grade media ingestion tool with verified media offloading, audio 
 - Perfect for sensitive client work, NDAs, and productions requiring chain-of-custody documentation
 
 **Offload Verification You Can Trust**
-- MD5/SHA256 checksums generated during copy with automatic verification
+- Multiple checksum algorithms: xxhash64 (default), xxhash32, xxhash128, MD5, SHA1, SHA256
+- Checksums generated during copy with automatic verification
 - Tamper-evident audit logs with hash chains for legal/professional compliance
 - Multi-destination copying to multiple drives simultaneously with integrity checks
 
@@ -48,7 +49,7 @@ A professional-grade media ingestion tool with verified media offloading, audio 
 
 ### 1. Media Offloading & Verification
 - Copy media from memory cards/storage devices to destination drives
-- Generate MD5/SHA256 checksums during copy
+- Generate checksums (xxhash64, xxhash32, xxhash128, MD5, SHA1, SHA256) during copy
 - Verify file integrity after transfer
 - Support multiple source/destination pairs
 - Progress tracking and detailed logging
@@ -491,7 +492,7 @@ ingesta ingest [OPTIONS]
 Options:
   --source PATH       Source directory/memory card (required)
   --dest PATH         Destination directory (can be used multiple times)
-  --checksum TEXT     Checksum algorithm: md5, sha256 (default: md5)
+  --checksum TEXT     Checksum algorithm: xxhash64, xxhash32, xxhash128, md5, sha1, sha256 (default: xxhash64)
   --verify            Verify after copy (default: True)
   --log-file PATH     Path to log file
   --include TEXT      File patterns to include (e.g., *.mov,*.mp4)
