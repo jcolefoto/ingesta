@@ -79,6 +79,65 @@ A professional-grade media ingestion tool that combines Shotput Pro-style offloa
 - **Proxy generation** - Create editing proxies and hero stills
 - **Keyword tagging** - Extract tags from transcription and visual content
 
+### 4. SAFE TO FORMAT Badge & Verification
+- **Visual confirmation** when all files pass checksum verification
+- **CLI badge display** showing "SAFE TO FORMAT" or "DO NOT FORMAT"
+- **PDF report integration** with color-coded status badges
+- **CSV summary** with verification counts and status
+- Clear reasoning provided when verification fails
+
+### 5. Editor Delivery Checklist
+- **Auto-generated QC checklist** highlighting issues for editors:
+  - Missing slates for syncable clips
+  - Audio problems (clipping, low levels, silence, no audio)
+  - Quality issues (corruption, black frames, blur)
+  - Missing metadata (timecode, reel IDs)
+  - Duplicate clip detection
+- **Severity classification**: Critical, Warning, Info
+- **Detailed recommendations** for each flagged issue
+- **TXT and CSV exports** for easy sharing
+- **Integrated into PDF reports** with color-coded sections
+
+### 6. Drive Health Monitoring (SMART)
+- **SMART data monitoring** for destination drives (via smartmontools)
+- **Health status detection**: Healthy, Warning, Critical
+- **Temperature monitoring** with configurable thresholds
+- **Bad sector detection** and alerting
+- **Free space monitoring** with low space warnings
+- **SSD wear level** tracking for flash storage
+- **Graceful fallback** when SMART tools unavailable
+- Cross-platform support (Linux, macOS, Windows)
+
+### 7. Smart Multicam Detection
+- **Timecode overlap detection** to identify multicam sequences
+- **Multicam bin creation** for editor organization
+- **Intelligent unsynced clip analysis** - goes beyond PluralEyes:
+  - Distinguishes B-roll from broken multicam
+  - Detects timecode discontinuities
+  - Matches slates/scenes across cameras
+  - Identifies technical issues vs sync failures
+- **Reasoning engine** explains WHY clips didn't sync
+- **Confidence scoring** for categorization decisions
+- **Comprehensive sync reports** with recommendations
+
+### 8. Editor Handoff Email Pack
+- **Auto-generated email drafts** for professional editor handoffs
+- **Project summary** with stats, deliverables, and issues
+- **Safe to format confirmation** prominently displayed
+- **QC issue summaries** with severity and recommendations
+- **Deliverable links/paths** to ZIP packages
+- **HTML email version** for rich formatting
+- **JSON summary** for integration with other tools
+
+### 9. Performance Profiles
+- **Three analysis modes** for different time constraints:
+  - **FAST** (1-2 min per 10 clips): Basic metadata, thumbnails, proxies
+  - **STANDARD** (3-5 min per 10 clips): Adds transcription, QC, multicam
+  - **DEEP** (10-15 min per 10 clips): Full analysis with frame analysis, large models
+- **Profile-specific settings** for quality vs speed tradeoffs
+- **CLI --profile flag** for easy selection
+- Automatic configuration of features based on profile
+
 ## Installation
 
 ```bash
@@ -315,6 +374,16 @@ ingesta report -m ./media -o ./reports \
     --generate-proxies \
     --extract-keywords \
     --group-by-folder
+
+# Use performance profiles for different time constraints
+# FAST: Quick analysis (1-2 min per 10 clips)
+ingesta report -m ./media -o ./reports --profile fast
+
+# STANDARD: Balanced analysis with transcription and QC (3-5 min per 10 clips)
+ingesta report -m ./media -o ./reports --profile standard
+
+# DEEP: Comprehensive analysis with frame analysis (10-15 min per 10 clips)
+ingesta report -m ./media -o ./reports --profile deep
 ```
 
 The report command:
@@ -423,9 +492,66 @@ Options:
   --proxy-resolution            Proxy resolution (default: 960x540)
                                 Options: 640x360, 960x540, 1280x720, 1920x1080
 
+  # Performance Profile
+  --profile TEXT                Analysis performance profile: fast, standard, deep (default: standard)
+                                fast: Quick analysis (1-2 min per 10 clips)
+                                standard: Balanced analysis (3-5 min per 10 clips)
+                                deep: Comprehensive analysis (10-15 min per 10 clips)
+
   # Project Reporting
   --project TEXT                Generate consolidated report for project ID
                                 Aggregates all media from all offloads associated with project
+```
+
+### Drive Health Check
+
+Check destination drive health before offloading:
+
+```bash
+# Check a single destination
+ingesta drive-health /Volumes/BackupDrive
+
+# Check multiple destinations
+ingesta drive-health /Volumes/Backup1 /Volumes/Backup2
+```
+
+Displays:
+- SMART data (temperature, bad sectors, wear level)
+- Free space monitoring
+- Health status (Healthy/Warning/Critical)
+- Recommendations for failing drives
+
+### View Audit Log
+
+View tamper-evident audit logs with verification:
+
+```bash
+# View recent entries
+ingesta audit-log --log-file ./ingestion_audit.log
+
+# Verify log integrity
+ingesta audit-log --log-file ./ingestion_audit.log --verify
+
+# Export to JSON
+ingesta audit-log --log-file ./ingestion_audit.log --export audit_export.json
+```
+
+### Generate Editor Handoff Package
+
+Create professional editor handoff materials:
+
+```bash
+# Generate after reporting
+ingesta handoff \
+  --project-name "Documentary_2024" \
+  --report-dir ./reports \
+  --deliverables ./deliverables.zip \
+  --output-dir ./handoff
+
+# Creates:
+# - editor_handoff_email.txt (text email draft)
+# - editor_handoff_email.html (HTML email)
+# - handoff_summary.json (machine-readable summary)
 ```
 
 ### Project Command
