@@ -93,10 +93,12 @@ def cli(ctx, verbose):
 @click.option('--project', '-p', help='Associate with project ID')
 @click.option('--shoot-day', help='Associate with shoot day ID (requires --project)')
 @click.option('--card-label', help='Card label (e.g., "A001", "Card 1")')
+@click.option('--card-physical-label', help='Physical label on card (e.g., "VM_03", "RentalHouse_001")')
+@click.option('--card-type', type=click.Choice(['sd_card', 'micro_sd', 'cfexpress_a', 'cfexpress_b', 'ssd_sata', 'ssd_nvme', 'usb_drive'], case_sensitive=False), help='Type of storage media')
 @click.option('--notes', help='Notes about this offload')
 @click.pass_context
 def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, report,
-           project, shoot_day, card_label, notes):
+           project, shoot_day, card_label, card_physical_label, card_type, notes):
     """
     Copy media from source to destination(s) with verification.
     
@@ -142,6 +144,13 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
         click.echo(f"  Failed: {job.failure_count}")
         click.echo(f"  Total size: {job.total_bytes / (1024**3):.2f} GB")
         
+        # Display copy speeds
+        if job.avg_copy_speed_mbps:
+            click.echo(f"\n📊 Copy Performance:")
+            click.echo(f"  Average: {job.avg_copy_speed_mbps:.1f} MB/s")
+            if job.min_copy_speed_mbps and job.max_copy_speed_mbps:
+                click.echo(f"  Range: {job.min_copy_speed_mbps:.1f} - {job.max_copy_speed_mbps:.1f} MB/s")
+        
         # Display SAFE TO FORMAT badge
         safe_status = job.safe_to_format_status
         click.echo(f"\n{'=' * 50}")
@@ -152,6 +161,54 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
         click.echo(f"  {safe_status['reason']}")
         click.echo(f"  Verified: {safe_status['verified_count']} | Failed: {safe_status['failed_count']}")
         click.echo(f"{'=' * 50}")
+        
+        # Track card performance if label provided
+        if card_physical_label or card_label:
+            from .card_tracker import get_card_tracker, CardType
+            
+            tracker = get_card_tracker()
+            
+            # Determine card type
+            card_type_enum = CardType.UNKNOWN
+            if card_type:
+                card_type_map = {
+                    'sd_card': CardType.SD_CARD,
+                    'micro_sd': CardType.MICRO_SD,
+                    'cfexpress_a': CardType.CFEXPRESS_TYPE_A,
+                    'cfexpress_b': CardType.CFEXPRESS_TYPE_B,
+                    'ssd_sata': CardType.SSD_SATA,
+                    'ssd_nvme': CardType.SSD_NVME,
+                    'usb_drive': CardType.USB_DRIVE,
+                }
+                card_type_enum = card_type_map.get(card_type, CardType.UNKNOWN)
+            
+            # Get or create card tracking
+            card = tracker.get_or_create_card(
+                physical_label=card_physical_label,
+                volume_name=Path(source).name,
+                reel_id=card_label,
+                card_type=card_type_enum
+            )
+            
+            # Record performance
+            duration = (job.end_time - job.start_time).total_seconds() if job.end_time and job.start_time else 0
+            tracker.record_ingestion(
+                card=card,
+                files_copied=job.success_count,
+                total_bytes=job.total_bytes,
+                duration_seconds=duration,
+                avg_speed=job.avg_copy_speed_mbps
+            )
+            
+            # Check for warnings
+            warnings = tracker.get_card_warnings(card)
+            if warnings:
+                click.echo(f"\n⚠️  Card Warnings:")
+                for warning in warnings:
+                    click.echo(f"  {warning}")
+            
+            click.echo(f"\n💾 Card tracked: {card.physical_label or card.volume_name} "
+                      f"(avg: {card.get_avg_speed():.1f} MB/s over {card.use_count} uses)")
         
         # Track in project if specified
         if project:

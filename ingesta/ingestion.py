@@ -26,6 +26,7 @@ class FileResult:
     error_message: Optional[str] = None
     file_size: int = 0
     copy_time: float = 0.0
+    copy_speed_mbps: Optional[float] = None  # Copy speed in MB/s
 
 
 @dataclass
@@ -61,6 +62,33 @@ class IngestionJob:
     @property
     def total_bytes(self) -> int:
         return sum(f.file_size for f in self.files_processed if f.success)
+    
+    @property
+    def avg_copy_speed_mbps(self) -> Optional[float]:
+        """Calculate average copy speed across all files."""
+        speeds = [f.copy_speed_mbps for f in self.files_processed 
+                  if f.success and f.copy_speed_mbps]
+        if speeds:
+            return sum(speeds) / len(speeds)
+        return None
+    
+    @property
+    def min_copy_speed_mbps(self) -> Optional[float]:
+        """Get minimum copy speed."""
+        speeds = [f.copy_speed_mbps for f in self.files_processed 
+                  if f.success and f.copy_speed_mbps]
+        if speeds:
+            return min(speeds)
+        return None
+    
+    @property
+    def max_copy_speed_mbps(self) -> Optional[float]:
+        """Get maximum copy speed."""
+        speeds = [f.copy_speed_mbps for f in self.files_processed 
+                  if f.success and f.copy_speed_mbps]
+        if speeds:
+            return max(speeds)
+        return None
     
     @property
     def is_safe_to_format(self) -> bool:
@@ -273,6 +301,10 @@ def copy_file_with_checksum(
         result.checksum = hash_obj.hexdigest()
         result.success = True
         result.copy_time = time.time() - start_time
+        
+        # Calculate copy speed
+        if result.copy_time > 0:
+            result.copy_speed_mbps = (result.file_size / result.copy_time) / (1024 * 1024)
         
     except Exception as e:
         result.error_message = str(e)
