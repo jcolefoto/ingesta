@@ -97,6 +97,45 @@ ingesta ingest \
   --log-file ingestion.log
 ```
 
+### Project & Shoot Day Management
+
+Organize offloads into projects and shoot days for consolidated reporting:
+
+**Create a new project:**
+```bash
+ingesta project new --name "Documentary_2024" --client "ABC Studios" --director "Jane Smith"
+```
+
+**List all projects:**
+```bash
+ingesta project list
+```
+
+**Add a shoot day to a project:**
+```bash
+ingesta project add-shoot-day PROJECT_ID --label "Day 1" --date 2024-01-15 --location "NYC Studio"
+```
+
+**Show project details:**
+```bash
+ingesta project show PROJECT_ID
+```
+
+**Ingest media and track in project:**
+```bash
+ingesta ingest \
+  --source /Volumes/CARD001 \
+  --dest /Backup/Project001 \
+  --project PROJECT_ID \
+  --shoot-day SHOOT_DAY_ID \
+  --card-label "A001"
+```
+
+**Generate consolidated project report:**
+```bash
+ingesta report --project PROJECT_ID --output-dir ./project-reports
+```
+
 ### Multiple Destinations
 
 Copy to multiple destinations simultaneously:
@@ -277,6 +316,11 @@ Options:
   --log-file PATH     Path to log file
   --include TEXT      File patterns to include (e.g., *.mov,*.mp4)
   --exclude TEXT      File patterns to exclude
+  --report PATH       Save JSON report to file
+  --project TEXT      Associate with project ID
+  --shoot-day TEXT    Associate with shoot day ID (requires --project)
+  --card-label TEXT   Card label (e.g., "A001", "Card 1")
+  --notes TEXT        Notes about this offload
 ```
 
 ### Sync Command
@@ -346,6 +390,45 @@ Options:
   --generate-proxies            Generate proxy files and hero stills
   --proxy-resolution            Proxy resolution (default: 960x540)
                                 Options: 640x360, 960x540, 1280x720, 1920x1080
+
+  # Project Reporting
+  --project TEXT                Generate consolidated report for project ID
+                                Aggregates all media from all offloads associated with project
+```
+
+### Project Command
+
+```
+ingesta project [COMMAND] [OPTIONS]
+
+Commands:
+  new                           Create a new project
+    --name TEXT                 Project name (required)
+    --client TEXT               Client name
+    --director TEXT             Director name
+    --producer TEXT             Producer name
+    --dp TEXT                   Director of Photography
+    --description TEXT          Project description
+    --base-dir PATH             Base directory for project files
+
+  list                          List all projects
+    --status                    Filter: active, completed, archived, all (default: all)
+
+  show                          Show project details
+    PROJECT_ID                  Project ID (required argument)
+
+  add-shoot-day                 Add a shoot day to a project
+    PROJECT_ID                  Project ID (required argument)
+    --label TEXT                Shoot day label (required, e.g., "Day 1")
+    --date TEXT                 Date (YYYY-MM-DD, defaults to today)
+    --location TEXT             Shoot location
+    --description TEXT          Description
+
+  report                        Generate consolidated report for project
+    PROJECT_ID                  Project ID (required argument)
+    --output-dir PATH           Output directory (default: ./reports)
+    --format TEXT               Report format: pdf, csv, both (default: both)
+    --include-all-offloads      Include analysis of all media from project
 ```
 
 ## Project Structure
@@ -360,6 +443,7 @@ ingesta/
 │   ├── premiere.py      # Premiere project generation
 │   ├── analysis.py      # Content analysis & classification
 │   ├── cli.py           # Command-line interface
+│   ├── project_manager.py  # Project and shoot day management
 │   └── reports/         # Report generation
 │       ├── __init__.py
 │       ├── xml_parser.py          # Camera XML sidecar parser

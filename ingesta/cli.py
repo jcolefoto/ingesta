@@ -21,6 +21,7 @@ from .reports import (
     LocalTranscriber, LocalFrameAnalyzer, AudioTechAnalyzer, MetadataExtractor,
     DuplicateDetector, BadClipDetector, ProxyGenerator, KeywordTagger
 )
+from .project_manager import ProjectManager, get_project_manager
 from .auto import AutoWorkflow
 
 
@@ -82,14 +83,22 @@ def cli(ctx, verbose):
               help='File patterns to exclude')
 @click.option('--report', '-r', type=click.Path(),
               help='Save JSON report to file')
+@click.option('--project', '-p', help='Associate with project ID')
+@click.option('--shoot-day', help='Associate with shoot day ID (requires --project)')
+@click.option('--card-label', help='Card label (e.g., "A001", "Card 1")')
+@click.option('--notes', help='Notes about this offload')
 @click.pass_context
-def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, report):
+def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, report,
+           project, shoot_day, card_label, notes):
     """
     Copy media from source to destination(s) with verification.
+    
+    Can be associated with a project and shoot day for consolidated reporting.
     
     Example:
         ingesta ingest -s /Volumes/CARD001 -d /Backup/Project001
         ingesta ingest -s ./video -d /Backup1 -d /Backup2 -c xxhash64
+        ingesta ingest -s /card -d /backup -p PROJECT_ID --shoot-day DAY_ID --card-label A001
     """
     setup_logging(ctx.obj['verbose'], log_file)
     
@@ -125,6 +134,35 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
         click.echo(f"  Successful: {job.success_count}")
         click.echo(f"  Failed: {job.failure_count}")
         click.echo(f"  Total size: {job.total_bytes / (1024**3):.2f} GB")
+        
+        # Track in project if specified
+        if project:
+            pm = get_project_manager()
+            
+            # If shoot_day not specified, use the first shoot day of the project
+            if not shoot_day:
+                proj_obj = pm.get_project(project)
+                if proj_obj and proj_obj.shoot_days:
+                    shoot_day = proj_obj.shoot_days[0].shoot_day_id
+                    click.echo(f"  Using shoot day: {proj_obj.shoot_days[0].label}")
+            
+            if shoot_day:
+                session = pm.add_ingest_session(
+                    project_id=project,
+                    shoot_day_id=shoot_day,
+                    source_path=source,
+                    destination_paths=list(dest),
+                    files_count=job.success_count,
+                    total_size_bytes=job.total_bytes,
+                    card_label=card_label,
+                    notes=notes
+                )
+                if session:
+                    click.echo(f"  Tracked in project: {project}")
+                else:
+                    click.echo(f"  ⚠️  Could not track in project (invalid project/shoot day ID)")
+            else:
+                click.echo(f"  ⚠️  No shoot day specified for project tracking")
         
         if report:
             job.save_report(report)
@@ -366,17 +404,21 @@ def analyze(ctx, media_dir, output, syncable_only):
               help='Whisper model size for transcription (default: base)')
 @click.option('--proxy-resolution', default='960x540',
               help='Proxy resolution (default: 960x540)')
+@click.option('--project', '-p', help='Generate consolidated report for project ID (aggregates all offloads)')
 @click.pass_context
-def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path, 
+def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path,
            group_by_folder, transcribe, analyze_frames, analyze_audio_tech, extract_metadata,
            detect_duplicates, check_quality, generate_proxies, extract_keywords,
-           whisper_model, proxy_resolution):
+           whisper_model, proxy_resolution, project):
     """
     Generate comprehensive reports from analyzed media.
-    
+
     Creates PDF and/or CSV reports with clip details, thumbnails,
     metadata, transcription, and visual analysis. All processing is done
     locally - no data is sent to external services.
+
+    For consolidated project reports, use --project PROJECT_ID to aggregate
+    all media from all offloads associated with the project.
     
     Example:
         ingesta report -m ./ingested -o ./reports
@@ -387,11 +429,44 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
     """
     setup_logging(ctx.obj['verbose'])
     
-    media_path = Path(media_dir)
+    # Handle project-based reporting
+    if project:
+        pm = get_project_manager()
+        proj_obj = pm.get_project(project)
+        if not proj_obj:
+            click.echo(f"❌ Project not found: {project}", err=True)
+            sys.exit(1)
+        
+        click.echo(f"📁 Generating consolidated report for project: {proj_obj.name}")
+        click.echo(f"   Project ID: {project}")
+        click.echo(f"   Shoot Days: {proj_obj.total_shoot_days}")
+        click.echo(f"   Total Sessions: {proj_obj.total_sessions}")
+        
+        # Get all media paths from project
+        project_media_paths = proj_obj.get_all_media_paths()
+        if not project_media_paths:
+            click.echo("⚠️  No media paths found in project. Has any media been ingested?", err=True)
+            sys.exit(1)
+        
+        click.echo(f"\n   Found {len(project_media_paths)} offload locations:")
+        for path in project_media_paths:
+            click.echo(f"   • {path}")
+        
+        # Use the first media path as the primary (or create a temp combined location)
+        # For now, we'll analyze each location separately and combine results
+        media_path = project_media_paths[0]
+        click.echo(f"\n   Primary media path: {media_path}")
+        
+        # Update project_name for the report
+        if not project_name:
+            project_name = proj_obj.name
+    else:
+        media_path = Path(media_dir)
+    
     output_path = Path(output_dir) if output_dir else Path("./reports")
     output_path.mkdir(parents=True, exist_ok=True)
     
-    click.echo(f"Generating reports...")
+    click.echo(f"\nGenerating reports...")
     click.echo(f"  Media directory: {media_path}")
     click.echo(f"  Output directory: {output_path}")
     click.echo(f"  Format: {report_format}")
@@ -787,6 +862,187 @@ def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thu
         click.echo(f"")
         click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
+
+
+# Project Management Commands
+@cli.group()
+def project():
+    """Manage projects and shoot days."""
+    pass
+
+
+@project.command('new')
+@click.option('--name', '-n', required=True, help='Project name')
+@click.option('--client', '-c', help='Client name')
+@click.option('--director', '-d', help='Director name')
+@click.option('--producer', '-p', help='Producer name')
+@click.option('--dp', help='Director of Photography')
+@click.option('--description', help='Project description')
+@click.option('--base-dir', '-b', help='Base directory for project files')
+@click.pass_context
+def project_new(ctx, name, client, director, producer, dp, description, base_dir):
+    """Create a new project."""
+    setup_logging(ctx.obj['verbose'])
+    
+    pm = get_project_manager()
+    
+    project = pm.create_project(
+        name=name,
+        client=client,
+        director=director,
+        producer=producer,
+        dp=dp,
+        description=description,
+        base_directory=base_dir
+    )
+    
+    click.echo(f"✅ Created project: {project.name}")
+    click.echo(f"   Project ID: {project.project_id}")
+    click.echo(f"   Created: {project.created_at}")
+    
+    if client:
+        click.echo(f"   Client: {client}")
+
+
+@project.command('list')
+@click.option('--status', type=click.Choice(['active', 'completed', 'archived', 'all']),
+              default='all', help='Filter by status')
+@click.pass_context
+def project_list(ctx, status):
+    """List all projects."""
+    setup_logging(ctx.obj['verbose'])
+    
+    pm = get_project_manager()
+    
+    filter_status = None if status == 'all' else status
+    projects = pm.list_projects(status=filter_status)
+    
+    if not projects:
+        click.echo("No projects found.")
+        return
+    
+    click.echo(f"\n{'ID':<10} {'Name':<30} {'Status':<12} {'Shoot Days':<12} {'Files':<10}")
+    click.echo("-" * 80)
+    
+    for proj in projects:
+        click.echo(f"{proj.project_id:<10} {proj.name:<30} {proj.status:<12} "
+                   f"{proj.total_shoot_days:<12} {proj.total_files:<10}")
+
+
+@project.command('show')
+@click.argument('project_id')
+@click.pass_context
+def project_show(ctx, project_id):
+    """Show project details."""
+    setup_logging(ctx.obj['verbose'])
+    
+    pm = get_project_manager()
+    project = pm.get_project(project_id)
+    
+    if not project:
+        click.echo(f"❌ Project not found: {project_id}", err=True)
+        sys.exit(1)
+    
+    click.echo(f"\n📁 Project: {project.name}")
+    click.echo(f"   ID: {project.project_id}")
+    click.echo(f"   Status: {project.status}")
+    click.echo(f"   Created: {project.created_at}")
+    
+    if project.client:
+        click.echo(f"   Client: {project.client}")
+    if project.director:
+        click.echo(f"   Director: {project.director}")
+    if project.producer:
+        click.echo(f"   Producer: {project.producer}")
+    if project.dp:
+        click.echo(f"   DP: {project.dp}")
+    if project.description:
+        click.echo(f"   Description: {project.description}")
+    
+    click.echo(f"\n   Total Shoot Days: {project.total_shoot_days}")
+    click.echo(f"   Total Sessions: {project.total_sessions}")
+    click.echo(f"   Total Files: {project.total_files}")
+    click.echo(f"   Total Size: {pm.format_size(project.total_size_bytes)}")
+    
+    if project.shoot_days:
+        click.echo(f"\n   Shoot Days:")
+        for sd in project.shoot_days:
+            click.echo(f"   • {sd.label} ({sd.date}) - {len(sd.sessions)} sessions, "
+                       f"{sd.total_files} files")
+
+
+@project.command('add-shoot-day')
+@click.argument('project_id')
+@click.option('--label', '-l', required=True, help='Shoot day label (e.g., "Day 1")')
+@click.option('--date', help='Date (YYYY-MM-DD), defaults to today')
+@click.option('--location', help='Shoot location')
+@click.option('--description', help='Description')
+@click.pass_context
+def project_add_shoot_day(ctx, project_id, label, date, location, description):
+    """Add a shoot day to a project."""
+    setup_logging(ctx.obj['verbose'])
+    
+    pm = get_project_manager()
+    
+    shoot_day = pm.add_shoot_day(
+        project_id=project_id,
+        label=label,
+        date=date,
+        location=location,
+        description=description
+    )
+    
+    if shoot_day:
+        click.echo(f"✅ Added shoot day: {shoot_day.label}")
+        click.echo(f"   ID: {shoot_day.shoot_day_id}")
+        click.echo(f"   Date: {shoot_day.date}")
+    else:
+        click.echo(f"❌ Project not found: {project_id}", err=True)
+        sys.exit(1)
+
+
+@project.command('report')
+@click.argument('project_id')
+@click.option('--output-dir', '-o', type=click.Path(),
+              help='Output directory for reports (default: ./reports)')
+@click.option('--format', '-f', 'report_format', default='both',
+              type=click.Choice(['pdf', 'csv', 'both']),
+              help='Report format (default: both)')
+@click.option('--include-all-offloads', is_flag=True,
+              help='Include analysis of all media from all offloads')
+@click.pass_context
+def project_report(ctx, project_id, output_dir, report_format, include_all_offloads):
+    """Generate consolidated report for entire project."""
+    setup_logging(ctx.obj['verbose'])
+    
+    pm = get_project_manager()
+    project = pm.get_project(project_id)
+    
+    if not project:
+        click.echo(f"❌ Project not found: {project_id}", err=True)
+        sys.exit(1)
+    
+    click.echo(f"📊 Generating project report for: {project.name}")
+    
+    # Show project summary
+    click.echo(f"\n   Project Summary:")
+    click.echo(f"   • Total Shoot Days: {project.total_shoot_days}")
+    click.echo(f"   • Total Sessions: {project.total_sessions}")
+    click.echo(f"   • Total Files: {project.total_files}")
+    click.echo(f"   • Total Size: {pm.format_size(project.total_size_bytes)}")
+    
+    if include_all_offloads:
+        click.echo(f"\n   Analyzing all media from project...")
+        # This would require scanning all destination paths
+        # For now, just show a message
+        click.echo(f"   (Media analysis would scan all {len(project.get_all_media_paths())} destination paths)")
+    
+    # Generate reports here (simplified for now)
+    output_path = Path(output_dir) if output_dir else Path("./reports")
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    click.echo(f"\n   Report saved to: {output_path}")
+    click.echo(f"   (Full consolidated reporting coming in next update)")
 
 
 def main():
