@@ -44,6 +44,41 @@ class CSVReportGenerator:
         'Has Slate',
         'Slate Text',
         'Has End Mark',
+        # Audio technical
+        'Audio Peak dBFS',
+        'Audio RMS dBFS',
+        'Audio Clipping',
+        'Audio Channels',
+        'Audio Sample Rate',
+        # Metadata
+        'Timecode Start',
+        'Timecode End',
+        'Scene',
+        'Shot',
+        'Take',
+        'Camera ID',
+        'Camera Model',
+        'Camera Serial',
+        'Lens Info',
+        'ISO',
+        'White Balance',
+        # Quality warnings
+        'Quality Warnings',
+        'Is Corrupted',
+        'Black Frame Count',
+        'Blur Score',
+        'Silence Ratio',
+        # Duplicate detection
+        'Is Duplicate',
+        'Duplicate Of',
+        'Duplicate Type',
+        # Keywords
+        'Keyword Tags',
+        'Priority Tags',
+        # Proxy paths
+        'Proxy Path',
+        'Hero Still Path',
+        'Web Proxy Path',
     ]
     
     def __init__(self, output_path: Optional[Path] = None):
@@ -164,21 +199,56 @@ class CSVReportGenerator:
             'Date Created': self.format_datetime(metadata.date_created if metadata else None),
             'Destination Path': str(file_path.parent),
             'Checksum': checksum or "",
-            'Resolution': resolution,
-            'Frame Rate': frame_rate,
+            'Resolution': resolution if resolution else (analysis.resolution or ""),
+            'Frame Rate': frame_rate if frame_rate else (f"{analysis.frame_rate:.2f} fps" if analysis.frame_rate else ""),
             'Codec': codec,
             'Motion Score': f"{analysis.motion_score:.2f}",
             'Audio Score': f"{analysis.audio_score:.2f}",
             'Confidence': f"{analysis.confidence:.2f}",
             'Bin': "",
             'Bin Type': "",
-            'Reel': "",
+            'Reel': analysis.reel_id or "",
             'Visual Description': analysis.visual_description or "",
             'Shot Type': analysis.shot_type or "",
             'Transcription Excerpt': analysis.transcription_excerpt or "",
             'Has Slate': 'Yes' if analysis.has_slate else 'No',
             'Slate Text': analysis.slate_text or "",
             'Has End Mark': 'Yes' if analysis.has_end_mark else 'No',
+            # Audio technical
+            'Audio Peak dBFS': f"{analysis.audio_peak_dbfs:.1f}" if analysis.audio_peak_dbfs is not None else "",
+            'Audio RMS dBFS': f"{analysis.audio_rms_dbfs:.1f}" if analysis.audio_rms_dbfs is not None else "",
+            'Audio Clipping': 'Yes' if analysis.audio_clipping else 'No',
+            'Audio Channels': str(analysis.audio_channels) if analysis.audio_channels else "",
+            'Audio Sample Rate': f"{analysis.audio_sample_rate} Hz" if analysis.audio_sample_rate else "",
+            # Metadata
+            'Timecode Start': analysis.timecode_start or "",
+            'Timecode End': analysis.timecode_end or "",
+            'Scene': analysis.scene or "",
+            'Shot': analysis.shot or "",
+            'Take': analysis.take or "",
+            'Camera ID': analysis.camera_id or "",
+            'Camera Model': analysis.camera_model or "",
+            'Camera Serial': analysis.camera_serial or "",
+            'Lens Info': analysis.lens_info or "",
+            'ISO': str(analysis.iso) if analysis.iso else "",
+            'White Balance': analysis.white_balance or "",
+            # Quality warnings
+            'Quality Warnings': '; '.join(analysis.quality_warnings) if analysis.quality_warnings else "",
+            'Is Corrupted': 'Yes' if analysis.is_corrupted else 'No',
+            'Black Frame Count': str(analysis.black_frame_count) if analysis.black_frame_count else "",
+            'Blur Score': f"{analysis.blur_score:.2f}" if analysis.blur_score else "",
+            'Silence Ratio': f"{analysis.silence_ratio:.2%}" if analysis.silence_ratio else "",
+            # Duplicate detection
+            'Is Duplicate': 'Yes' if analysis.is_duplicate else 'No',
+            'Duplicate Of': ', '.join(analysis.duplicate_of) if analysis.duplicate_of else "",
+            'Duplicate Type': analysis.duplicate_type or "",
+            # Keywords
+            'Keyword Tags': ', '.join(analysis.keyword_tags[:10]) if analysis.keyword_tags else "",
+            'Priority Tags': ', '.join(analysis.priority_tags[:5]) if analysis.priority_tags else "",
+            # Proxy paths
+            'Proxy Path': analysis.proxy_path or "",
+            'Hero Still Path': analysis.hero_still_path or "",
+            'Web Proxy Path': analysis.web_proxy_path or "",
         }
         
         return row

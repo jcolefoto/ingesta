@@ -40,6 +40,12 @@ A Python-based media ingestion tool that combines Shotput Pro-style offloading w
 - **Local transcription** - Transcribe audio using whisper.cpp (fully offline)
 - **Frame analysis** - Generate visual descriptions and detect shot types (fully offline)
 - **Slate detection** - Automatically detect scene/take slates and end marks in audio
+- **Audio technical analysis** - Peak/RMS levels, clipping detection, channel/sample rate analysis
+- **Timecode & metadata extraction** - Extract timecode, reel IDs, scene/shot/take, camera info
+- **Duplicate detection** - Find exact and near-duplicate clips
+- **Quality warnings** - Detect black frames, blur, long silence, corruption
+- **Proxy generation** - Create editing proxies and hero stills
+- **Keyword tagging** - Extract tags from transcription and visual content
 
 ## Installation
 
@@ -214,6 +220,30 @@ ingesta report -m ./media --transcribe --whisper-model medium
 
 # Frame analysis only
 ingesta report -m ./media -o ./reports --analyze-frames
+
+# Full technical analysis with audio metrics and metadata
+ingesta report -m ./media -o ./reports \
+    --analyze-audio-tech \
+    --extract-metadata \
+    --transcribe
+
+# Quality control check with proxy generation
+ingesta report -m ./media -o ./reports \
+    --check-quality \
+    --detect-duplicates \
+    --generate-proxies
+
+# Comprehensive analysis with all features
+ingesta report -m ./media -o ./reports \
+    --transcribe \
+    --analyze-frames \
+    --analyze-audio-tech \
+    --extract-metadata \
+    --detect-duplicates \
+    --check-quality \
+    --generate-proxies \
+    --extract-keywords \
+    --group-by-folder
 ```
 
 The report command:
@@ -283,23 +313,39 @@ Options:
 ingesta report [OPTIONS]
 
 Options:
-  --media-dir PATH    Directory containing media files (required)
-  --output-dir PATH   Output directory for reports (default: ./reports)
-  --format TEXT       Report format: pdf, csv, both (default: both)
-  --thumbnails        Generate thumbnails (default: enabled)
-  --no-thumbnails     Skip thumbnail generation
-  --project-name TEXT Project name for report
-  --source-path TEXT  Source media path for report metadata
-  --dest-path PATH    Destination/archive path (can use multiple times)
-  --group-by-folder   Group clips by folder structure (ShotPut-style bins)
-                      Organizes clips into bins based on top-level folder names
-                      (e.g., A001, B002, Sound_001) with filename fallback
-  --transcribe        Transcribe audio locally using whisper.cpp (default: False)
-                      All transcription happens locally - no data sent online
-  --analyze-frames    Analyze frames for visual description (default: False)
-                      Frame analysis happens locally - no data sent online
-  --whisper-model     Whisper model size: base, small, medium, large (default: base)
-                      Larger models are more accurate but slower
+  --media-dir PATH              Directory containing media files (required)
+  --output-dir PATH             Output directory for reports (default: ./reports)
+  --format TEXT                 Report format: pdf, csv, both (default: both)
+  --thumbnails                  Generate thumbnails (default: enabled)
+  --no-thumbnails               Skip thumbnail generation
+  --project-name TEXT           Project name for report
+  --source-path TEXT            Source media path for report metadata
+  --dest-path PATH              Destination/archive path (can use multiple times)
+
+  # Organization
+  --group-by-folder             Group clips by folder structure (ShotPut-style bins)
+                                Organizes clips into bins based on top-level folder names
+                                (e.g., A001, B002, Sound_001) with filename fallback
+
+  # Transcription & Analysis
+  --transcribe                  Transcribe audio locally using whisper.cpp (default: False)
+                                All transcription happens locally - no data sent online
+  --analyze-frames              Analyze frames for visual description (default: False)
+                                Frame analysis happens locally - no data sent online
+  --analyze-audio-tech          Analyze audio technical details (peak, RMS, clipping)
+  --extract-metadata            Extract timecode, reel IDs, camera metadata
+  --extract-keywords            Extract keyword tags from transcription and visuals
+  --whisper-model               Whisper model size: base, small, medium, large (default: base)
+                                Larger models are more accurate but slower
+
+  # Quality & Duplicates
+  --detect-duplicates           Detect duplicate and near-duplicate clips
+  --check-quality               Check for quality issues (black frames, blur, silence)
+
+  # Proxy Generation
+  --generate-proxies            Generate proxy files and hero stills
+  --proxy-resolution            Proxy resolution (default: 960x540)
+                                Options: 640x360, 960x540, 1280x720, 1920x1080
 ```
 
 ## Project Structure
@@ -316,13 +362,19 @@ ingesta/
 │   ├── cli.py           # Command-line interface
 │   └── reports/         # Report generation
 │       ├── __init__.py
-│       ├── xml_parser.py       # Camera XML sidecar parser
-│       ├── thumbnails.py       # Thumbnail extraction
-│       ├── csv_report.py       # CSV report generator
-│       ├── pdf_report.py       # PDF report generator
-│       ├── bin_organizer.py    # ShotPut-style bin/clip organization
-│       ├── local_transcription.py  # Local audio transcription (whisper.cpp)
-│       └── frame_analysis.py   # Local frame analysis for visual descriptions
+│       ├── xml_parser.py          # Camera XML sidecar parser
+│       ├── thumbnails.py          # Thumbnail extraction
+│       ├── csv_report.py          # CSV report generator
+│       ├── pdf_report.py          # PDF report generator
+│       ├── bin_organizer.py       # ShotPut-style bin/clip organization
+│       ├── local_transcription.py # Local audio transcription (whisper.cpp)
+│       ├── frame_analysis.py      # Local frame analysis for visual descriptions
+│       ├── audio_tech.py          # Audio technical analysis (peak, RMS, clipping)
+│       ├── metadata_extractor.py  # Timecode and metadata extraction
+│       ├── duplicate_detector.py  # Duplicate and near-duplicate detection
+│       ├── bad_clip_detector.py   # Quality warnings (black frames, blur, etc.)
+│       ├── proxy_generator.py     # Proxy and hero still generation
+│       └── keyword_tagger.py      # Keyword extraction from content
 ├── tests/
 │   └── test_*.py
 ├── README.md
@@ -433,6 +485,212 @@ Frame analysis extracts and analyzes key frames using FFmpeg:
 - Visual description: "Medium shot interior - static camera"
 - Shot type classification
 - Brightness/contrast scores
+
+### Audio Technical Analysis
+
+Detailed audio metrics for quality control:
+
+**Features:**
+- **Peak Level**: Maximum audio level in dBFS
+- **RMS Level**: Average audio level in dBFS
+- **Clipping Detection**: Identifies audio clipping and counts instances
+- **Channel Configuration**: Mono, stereo, multi-channel
+- **Sample Rate**: 44.1kHz, 48kHz, 96kHz, etc.
+- **Bit Depth**: 16-bit, 24-bit, etc.
+- **Codec**: AAC, PCM, etc.
+- **Warnings**: Alerts for clipping, low levels, long silence
+
+**Security:**
+- Audio extracted temporarily for analysis
+- All processing done locally via FFmpeg
+- No audio leaves your machine
+
+### Metadata Extraction
+
+Extract professional production metadata:
+
+**Timecode:**
+- Start timecode (HH:MM:SS:FF)
+- End timecode
+- Duration in timecode
+- Frame rate detection
+- Drop-frame flag
+
+**Production Info:**
+- Reel ID (A001, B002, etc.)
+- Scene number
+- Shot number
+- Take number
+- Camera ID
+
+**Camera Metadata:**
+- Camera model
+- Serial number
+- Lens information
+- ISO
+- White balance
+
+**Security:**
+- Metadata extracted via FFmpeg ffprobe
+- No data sent to external services
+
+### Duplicate Detection
+
+Find duplicate and near-duplicate clips:
+
+**Exact Duplicates:**
+- File hash comparison (xxhash/MD5)
+- Identical file detection
+
+**Near-Duplicates:**
+- Similar duration (within 5%)
+- Similar file size (within 5%)
+- Filename pattern matching
+- Similarity score (0-1)
+
+**Use Cases:**
+- Identify backup copies
+- Find accidentally imported duplicates
+- Detect multiple takes of same shot
+
+**Output:**
+- Duplicate flag
+- List of duplicate filenames
+- Duplicate type (exact/near)
+- Similarity percentage
+
+### Quality Warnings
+
+Automated quality control checks:
+
+**Black Frame Detection:**
+- Detects completely black frames
+- Counts instances
+- Critical warning if >10 frames
+
+**Blur Detection:**
+- Estimates focus/blur using edge detection
+- Blur score 0-1
+- Warning if severely out of focus
+
+**Silence Detection:**
+- Measures silence ratio
+- Warns if >50% silence
+- Detects no audio stream
+
+**Corruption Detection:**
+- Checks for decode errors
+- Identifies truncated files
+- Detects missing frames
+
+**Exposure Issues:**
+- Overexposed highlights (>240)
+- Underexposed shadows (<15)
+
+**Security:**
+- All analysis done locally via FFmpeg
+- No frames sent to external services
+
+### Proxy Generation
+
+Create editing proxies and preview files:
+
+**Proxy Video:**
+- Lower resolution (default 960x540)
+- H.264 or ProRes codec
+- Smaller file sizes
+- Suitable for editing
+
+**Hero Still:**
+- Best frame extraction (10% into clip)
+- High resolution (1920px width)
+- JPEG format
+- Thumbnail/preview ready
+
+**Web Proxy:**
+- Web-optimized H.264
+- Fast start for web playback
+- 1280x720 max resolution
+- Suitable for web review
+
+**Usage:**
+```bash
+# Generate proxies with default settings
+ingesta report -m ./media --generate-proxies
+
+# Custom proxy resolution
+ingesta report -m ./media --generate-proxies --proxy-resolution 1280x720
+```
+
+**Security:**
+- All transcoding done locally via FFmpeg
+- No uploads required
+
+### Keyword Tagging
+
+Extract searchable tags from content:
+
+**From Transcription:**
+- Dialogue keywords (most frequent words)
+- Topic extraction
+- Named entities
+- Technical terms
+
+**From Visual Analysis:**
+- Shot type tags (wide, medium, close-up)
+- Scene type (interior/exterior)
+- Production type (interview, b-roll, etc.)
+
+**From Metadata:**
+- Scene/shot/take numbers
+- Reel IDs
+- Camera information
+
+**Priority Tags:**
+- Most relevant tags across all sources
+- Up to 10 priority tags per clip
+- Production keywords boosted
+
+**Output:**
+- All tags (up to 30)
+- Priority tags (top 10)
+- CSV-friendly comma-separated format
+
+**Security:**
+- All processing done locally
+- No text sent to external NLP services
+
+### Full Analysis Example
+
+Run comprehensive analysis with all features:
+
+```bash
+ingesta report -m ./media -o ./reports \
+    --transcribe \
+    --analyze-frames \
+    --analyze-audio-tech \
+    --extract-metadata \
+    --detect-duplicates \
+    --check-quality \
+    --generate-proxies \
+    --extract-keywords \
+    --group-by-folder \
+    --whisper-model medium
+```
+
+This will generate:
+- PDF and CSV reports with all metadata
+- Transcription excerpts and slate detection
+- Visual descriptions and shot types
+- Audio technical details (peak, RMS, clipping)
+- Timecode, reel IDs, scene/shot/take
+- Quality warnings for problematic clips
+- Duplicate flags
+- Proxy files and hero stills
+- Keyword tags
+- ShotPut-style bin organization
+
+**Security Note:** All processing is done locally. No media, audio, or data is sent to external services.
 
 ## License
 

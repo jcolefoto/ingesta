@@ -18,7 +18,8 @@ from .analysis import ContentAnalyzer
 from .checksum import get_supported_algorithms
 from .reports import (
     ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator, BinOrganizer,
-    LocalTranscriber, LocalFrameAnalyzer
+    LocalTranscriber, LocalFrameAnalyzer, AudioTechAnalyzer, MetadataExtractor,
+    DuplicateDetector, BadClipDetector, ProxyGenerator, KeywordTagger
 )
 from .auto import AutoWorkflow
 
@@ -348,11 +349,28 @@ def analyze(ctx, media_dir, output, syncable_only):
               help='Transcribe audio locally using whisper.cpp (default: False)')
 @click.option('--analyze-frames/--no-analyze-frames', default=False,
               help='Analyze frames for visual description (default: False)')
+@click.option('--analyze-audio-tech/--no-analyze-audio-tech', default=False,
+              help='Analyze audio technical details (peak, RMS, clipping) (default: False)')
+@click.option('--extract-metadata/--no-extract-metadata', default=False,
+              help='Extract timecode, reel IDs, camera metadata (default: False)')
+@click.option('--detect-duplicates/--no-detect-duplicates', default=False,
+              help='Detect duplicate and near-duplicate clips (default: False)')
+@click.option('--check-quality/--no-check-quality', default=False,
+              help='Check for quality issues (black frames, blur, silence) (default: False)')
+@click.option('--generate-proxies/--no-generate-proxies', default=False,
+              help='Generate proxy files and hero stills (default: False)')
+@click.option('--extract-keywords/--no-extract-keywords', default=False,
+              help='Extract keyword tags from transcription and visual analysis (default: False)')
 @click.option('--whisper-model', default='base',
               type=click.Choice(['base', 'small', 'medium', 'large']),
               help='Whisper model size for transcription (default: base)')
+@click.option('--proxy-resolution', default='960x540',
+              help='Proxy resolution (default: 960x540)')
 @click.pass_context
-def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path, group_by_folder, transcribe, analyze_frames, whisper_model):
+def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path, 
+           group_by_folder, transcribe, analyze_frames, analyze_audio_tech, extract_metadata,
+           detect_duplicates, check_quality, generate_proxies, extract_keywords,
+           whisper_model, proxy_resolution):
     """
     Generate comprehensive reports from analyzed media.
     
@@ -381,6 +399,12 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
     click.echo(f"  Group by folder: {'Yes' if group_by_folder else 'No'}")
     click.echo(f"  Transcribe: {'Yes' if transcribe else 'No'}")
     click.echo(f"  Analyze frames: {'Yes' if analyze_frames else 'No'}")
+    click.echo(f"  Analyze audio tech: {'Yes' if analyze_audio_tech else 'No'}")
+    click.echo(f"  Extract metadata: {'Yes' if extract_metadata else 'No'}")
+    click.echo(f"  Detect duplicates: {'Yes' if detect_duplicates else 'No'}")
+    click.echo(f"  Check quality: {'Yes' if check_quality else 'No'}")
+    click.echo(f"  Generate proxies: {'Yes' if generate_proxies else 'No'}")
+    click.echo(f"  Extract keywords: {'Yes' if extract_keywords else 'No'}")
     
     try:
         # Step 1: Analyze media
@@ -394,7 +418,30 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
         
         click.echo(f"  Found {len(analyses)} clips")
         
-        # Step 2: Transcribe audio if requested (LOCAL ONLY)
+        # Step 2: Extract metadata if requested
+        if extract_metadata:
+            click.echo("\nExtracting metadata (timecode, reel IDs, camera info)...")
+            metadata_extractor = MetadataExtractor()
+            for i, analysis in enumerate(analyses, 1):
+                click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                result = metadata_extractor.extract(analysis.file_path)
+                if result:
+                    analysis.timecode_start = result.timecode.start_tc
+                    analysis.timecode_end = result.timecode.end_tc
+                    analysis.reel_id = result.reel.reel_id
+                    analysis.scene = result.reel.scene
+                    analysis.shot = result.reel.shot
+                    analysis.take = result.reel.take
+                    analysis.camera_id = result.reel.camera_id
+                    analysis.camera_model = result.camera_model
+                    analysis.camera_serial = result.camera_serial
+                    analysis.lens_info = result.lens_info
+                    analysis.iso = result.iso
+                    analysis.white_balance = result.white_balance
+                    analysis.resolution = result.resolution
+                    analysis.frame_rate = result.frame_rate
+        
+        # Step 3: Transcribe audio if requested (LOCAL ONLY)
         if transcribe:
             click.echo("\nTranscribing audio (local processing - no data sent online)...")
             transcriber = LocalTranscriber(model=whisper_model)
@@ -410,7 +457,7 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
                     if result.has_slate:
                         click.echo(f"      Slate detected: {result.slate_text}")
         
-        # Step 3: Analyze frames if requested (LOCAL ONLY)
+        # Step 4: Analyze frames if requested (LOCAL ONLY)
         if analyze_frames:
             click.echo("\nAnalyzing frames for visual description (local processing)...")
             frame_analyzer = LocalFrameAnalyzer()
@@ -422,7 +469,113 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
                     analysis.shot_type = result.shot_type.value
                     click.echo(f"      {result.description}")
         
-        # Step 4: Extract thumbnails if requested
+        # Step 5: Analyze audio tech if requested
+        if analyze_audio_tech:
+            click.echo("\nAnalyzing audio technical details...")
+            audio_analyzer = AudioTechAnalyzer()
+            for i, analysis in enumerate(analyses, 1):
+                click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                result = audio_analyzer.analyze(analysis.file_path)
+                if result:
+                    analysis.audio_peak_dbfs = result.peak_dbfs
+                    analysis.audio_rms_dbfs = result.rms_dbfs
+                    analysis.audio_clipping = result.clipping_detected
+                    analysis.audio_clipping_count = result.clipping_count
+                    analysis.audio_channels = result.channels
+                    analysis.audio_sample_rate = result.sample_rate
+                    analysis.audio_bit_depth = result.bit_depth
+                    analysis.audio_codec = result.codec
+                    analysis.audio_warnings = result.warnings
+                    if result.warnings:
+                        click.echo(f"      Warnings: {', '.join(result.warnings)}")
+        
+        # Step 6: Check quality if requested
+        if check_quality:
+            click.echo("\nChecking clip quality...")
+            quality_checker = BadClipDetector()
+            for i, analysis in enumerate(analyses, 1):
+                click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                result = quality_checker.detect(analysis.file_path, analysis.duration)
+                if result:
+                    analysis.quality_warnings = [w.message for w in result.warnings]
+                    analysis.is_corrupted = result.is_corrupted
+                    analysis.black_frame_count = result.black_frame_count
+                    analysis.blur_score = result.blur_score
+                    analysis.silence_ratio = result.silence_ratio
+                    if result.has_issues:
+                        click.echo(f"      Issues: {len(result.warnings)}")
+        
+        # Step 7: Detect duplicates if requested
+        if detect_duplicates:
+            click.echo("\nDetecting duplicates...")
+            dup_detector = DuplicateDetector()
+            file_list = [a.file_path for a in analyses]
+            durations = {a.file_path: a.duration for a in analyses}
+            dup_results = dup_detector.detect(file_list, durations)
+            
+            dup_count = 0
+            for analysis in analyses:
+                dup_info = dup_results.get(analysis.file_path)
+                if dup_info and dup_info.is_duplicate:
+                    analysis.is_duplicate = True
+                    analysis.duplicate_of = dup_info.duplicate_of
+                    analysis.duplicate_type = dup_info.duplicate_type
+                    dup_count += 1
+            
+            click.echo(f"  Found {dup_count} duplicate clips")
+        
+        # Step 8: Generate proxies if requested
+        if generate_proxies:
+            click.echo("\nGenerating proxies and hero stills...")
+            proxy_dir = output_path / "proxies"
+            proxy_dir.mkdir(parents=True, exist_ok=True)
+            proxy_gen = ProxyGenerator()
+            
+            for i, analysis in enumerate(analyses, 1):
+                click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                result = proxy_gen.generate(
+                    analysis.file_path, 
+                    proxy_dir, 
+                    resolution=proxy_resolution,
+                    create_web=True,
+                    extract_hero=True
+                )
+                if result.success:
+                    if result.proxy_path:
+                        analysis.proxy_path = str(result.proxy_path.relative_to(output_path))
+                    if result.hero_still_path:
+                        analysis.hero_still_path = str(result.hero_still_path.relative_to(output_path))
+                    if result.web_proxy_path:
+                        analysis.web_proxy_path = str(result.web_proxy_path.relative_to(output_path))
+                    click.echo(f"      Proxy created")
+        
+        # Step 9: Extract keywords if requested
+        if extract_keywords:
+            click.echo("\nExtracting keyword tags...")
+            tagger = KeywordTagger()
+            for i, analysis in enumerate(analyses, 1):
+                click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                
+                # Build metadata dict for tagger
+                meta = {
+                    'scene': analysis.scene,
+                    'shot': analysis.shot,
+                    'take': analysis.take,
+                    'reel_id': analysis.reel_id,
+                    'clip_type': analysis.clip_type.value if analysis.clip_type else None,
+                }
+                
+                result = tagger.tag(
+                    analysis.transcription,
+                    analysis.visual_description,
+                    meta
+                )
+                
+                analysis.keyword_tags = result.all_tags
+                analysis.priority_tags = result.priority_tags
+                click.echo(f"      {len(result.priority_tags)} priority tags")
+        
+        # Step 10: Extract thumbnails if requested
         thumbnail_map = {}
         if thumbnails:
             click.echo("\nExtracting thumbnails...")

@@ -57,6 +57,7 @@ class ClipAnalysis:
     audio_score: float   # 0.0 to 1.0, higher = clearer audio
     confidence: float    # 0.0 to 1.0, classification confidence
     metadata: Optional[Dict] = None
+    
     # Transcription and visual analysis fields
     transcription: Optional[str] = None
     transcription_excerpt: Optional[str] = None
@@ -66,9 +67,67 @@ class ClipAnalysis:
     visual_description: Optional[str] = None
     shot_type: Optional[str] = None
     
+    # Audio technical analysis
+    audio_peak_dbfs: Optional[float] = None
+    audio_rms_dbfs: Optional[float] = None
+    audio_clipping: bool = False
+    audio_clipping_count: int = 0
+    audio_channels: int = 0
+    audio_sample_rate: int = 0
+    audio_bit_depth: Optional[int] = None
+    audio_codec: str = ""
+    audio_warnings: Optional[List[str]] = None
+    
+    # Metadata extraction
+    timecode_start: Optional[str] = None
+    timecode_end: Optional[str] = None
+    reel_id: Optional[str] = None
+    scene: Optional[str] = None
+    shot: Optional[str] = None
+    take: Optional[str] = None
+    camera_id: Optional[str] = None
+    camera_model: Optional[str] = None
+    camera_serial: Optional[str] = None
+    lens_info: Optional[str] = None
+    iso: Optional[int] = None
+    white_balance: Optional[str] = None
+    resolution: Optional[str] = None
+    frame_rate: Optional[float] = None
+    
+    # Quality warnings
+    quality_warnings: Optional[List[str]] = None
+    is_corrupted: bool = False
+    black_frame_count: int = 0
+    blur_score: float = 0.0
+    silence_ratio: float = 0.0
+    
+    # Duplicate detection
+    is_duplicate: bool = False
+    duplicate_of: Optional[List[str]] = None
+    duplicate_type: str = ""  # 'exact', 'near', ''
+    
+    # Keyword tags
+    keyword_tags: Optional[List[str]] = None
+    priority_tags: Optional[List[str]] = None
+    
+    # Proxy paths
+    proxy_path: Optional[str] = None
+    hero_still_path: Optional[str] = None
+    web_proxy_path: Optional[str] = None
+    
     def __post_init__(self):
         if self.metadata is None:
             self.metadata = {}
+        if self.audio_warnings is None:
+            self.audio_warnings = []
+        if self.quality_warnings is None:
+            self.quality_warnings = []
+        if self.duplicate_of is None:
+            self.duplicate_of = []
+        if self.keyword_tags is None:
+            self.keyword_tags = []
+        if self.priority_tags is None:
+            self.priority_tags = []
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for serialization."""
@@ -90,6 +149,22 @@ class ClipAnalysis:
             "slate_text": self.slate_text,
             "visual_description": self.visual_description,
             "shot_type": self.shot_type,
+            "audio_peak_dbfs": self.audio_peak_dbfs,
+            "audio_rms_dbfs": self.audio_rms_dbfs,
+            "audio_clipping": self.audio_clipping,
+            "audio_channels": self.audio_channels,
+            "audio_sample_rate": self.audio_sample_rate,
+            "timecode_start": self.timecode_start,
+            "timecode_end": self.timecode_end,
+            "reel_id": self.reel_id,
+            "scene": self.scene,
+            "shot": self.shot,
+            "take": self.take,
+            "camera_id": self.camera_id,
+            "camera_model": self.camera_model,
+            "quality_warnings": self.quality_warnings,
+            "is_duplicate": self.is_duplicate,
+            "keyword_tags": self.keyword_tags,
         }
 
 
