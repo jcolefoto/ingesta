@@ -16,7 +16,10 @@ from .sync import sync_audio_video
 from .premiere import create_premiere_project
 from .analysis import ContentAnalyzer
 from .checksum import get_supported_algorithms
-from .reports import ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator, BinOrganizer
+from .reports import (
+    ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator, BinOrganizer,
+    LocalTranscriber, LocalFrameAnalyzer
+)
 from .auto import AutoWorkflow
 
 
@@ -341,20 +344,28 @@ def analyze(ctx, media_dir, output, syncable_only):
               help='Destination/archive path (can be used multiple times)')
 @click.option('--group-by-folder', '-g', is_flag=True,
               help='Group clips by folder structure (ShotPut-style bins)')
+@click.option('--transcribe/--no-transcribe', default=False,
+              help='Transcribe audio locally using whisper.cpp (default: False)')
+@click.option('--analyze-frames/--no-analyze-frames', default=False,
+              help='Analyze frames for visual description (default: False)')
+@click.option('--whisper-model', default='base',
+              type=click.Choice(['base', 'small', 'medium', 'large']),
+              help='Whisper model size for transcription (default: base)')
 @click.pass_context
-def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path, group_by_folder):
+def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path, group_by_folder, transcribe, analyze_frames, whisper_model):
     """
     Generate comprehensive reports from analyzed media.
     
     Creates PDF and/or CSV reports with clip details, thumbnails,
-    metadata, and summary statistics. Can be run standalone or
-    after the analyze command.
+    metadata, transcription, and visual analysis. All processing is done
+    locally - no data is sent to external services.
     
     Example:
         ingesta report -m ./ingested -o ./reports
         ingesta report -m ./media --format pdf --no-thumbnails
         ingesta report -m ./media -n "Project Alpha" -s /card -d /backup1 -d /backup2
         ingesta report -m ./ingested -g -o ./reports  # ShotPut-style bins
+        ingesta report -m ./media --transcribe --analyze-frames  # Full analysis
     """
     setup_logging(ctx.obj['verbose'])
     
@@ -368,6 +379,8 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
     click.echo(f"  Format: {report_format}")
     click.echo(f"  Thumbnails: {'Yes' if thumbnails else 'No'}")
     click.echo(f"  Group by folder: {'Yes' if group_by_folder else 'No'}")
+    click.echo(f"  Transcribe: {'Yes' if transcribe else 'No'}")
+    click.echo(f"  Analyze frames: {'Yes' if analyze_frames else 'No'}")
     
     try:
         # Step 1: Analyze media
@@ -381,7 +394,35 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
         
         click.echo(f"  Found {len(analyses)} clips")
         
-        # Step 2: Extract thumbnails if requested
+        # Step 2: Transcribe audio if requested (LOCAL ONLY)
+        if transcribe:
+            click.echo("\nTranscribing audio (local processing - no data sent online)...")
+            transcriber = LocalTranscriber(model=whisper_model)
+            for i, analysis in enumerate(analyses, 1):
+                click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                result = transcriber.transcribe(analysis.file_path)
+                if result:
+                    analysis.transcription = result.text
+                    analysis.transcription_excerpt = result.excerpt
+                    analysis.has_slate = result.has_slate
+                    analysis.has_end_mark = result.has_end_mark
+                    analysis.slate_text = result.slate_text
+                    if result.has_slate:
+                        click.echo(f"      Slate detected: {result.slate_text}")
+        
+        # Step 3: Analyze frames if requested (LOCAL ONLY)
+        if analyze_frames:
+            click.echo("\nAnalyzing frames for visual description (local processing)...")
+            frame_analyzer = LocalFrameAnalyzer()
+            for i, analysis in enumerate(analyses, 1):
+                click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                result = frame_analyzer.analyze(analysis.file_path)
+                if result:
+                    analysis.visual_description = result.description
+                    analysis.shot_type = result.shot_type.value
+                    click.echo(f"      {result.description}")
+        
+        # Step 4: Extract thumbnails if requested
         thumbnail_map = {}
         if thumbnails:
             click.echo("\nExtracting thumbnails...")

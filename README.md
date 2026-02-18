@@ -2,6 +2,16 @@
 
 A Python-based media ingestion tool that combines Shotput Pro-style offloading with verification and Pluralize-style audio sync capabilities.
 
+## Security & Privacy
+
+**All processing is done locally on your machine. No media files, transcriptions, or analysis data is ever sent to external services or cloud providers.**
+
+- Local transcription using whisper.cpp - no audio leaves your machine
+- Local frame analysis using FFmpeg - no frames uploaded
+- Local checksum generation and verification
+- No internet connection required for core functionality
+- Your media stays on your system
+
 ## Features
 
 ### 1. Media Offloading & Verification (Shotput Pro-style)
@@ -27,6 +37,9 @@ A Python-based media ingestion tool that combines Shotput Pro-style offloading w
 - Content classification (B-roll, interview, establishing shots, etc.)
 - Summary statistics and breakdown by clip type
 - **ShotPut-style bin/clip organization** - Group clips by folder structure (A001, B002, Sound_001, etc.) for editor-ready workflows
+- **Local transcription** - Transcribe audio using whisper.cpp (fully offline)
+- **Frame analysis** - Generate visual descriptions and detect shot types (fully offline)
+- **Slate detection** - Automatically detect scene/take slates and end marks in audio
 
 ## Installation
 
@@ -192,6 +205,15 @@ ingesta report -m ./ingested -o ./reports --group-by-folder
 #     B002_001.MOV
 #   Sound_001/      → Bin: Sound_001 (Sound Roll)
 #     AUDIO_001.WAV
+
+# With local transcription and frame analysis (fully offline)
+ingesta report -m ./media -o ./reports --transcribe --analyze-frames
+
+# Transcription with larger model for better accuracy (slower)
+ingesta report -m ./media --transcribe --whisper-model medium
+
+# Frame analysis only
+ingesta report -m ./media -o ./reports --analyze-frames
 ```
 
 The report command:
@@ -272,6 +294,12 @@ Options:
   --group-by-folder   Group clips by folder structure (ShotPut-style bins)
                       Organizes clips into bins based on top-level folder names
                       (e.g., A001, B002, Sound_001) with filename fallback
+  --transcribe        Transcribe audio locally using whisper.cpp (default: False)
+                      All transcription happens locally - no data sent online
+  --analyze-frames    Analyze frames for visual description (default: False)
+                      Frame analysis happens locally - no data sent online
+  --whisper-model     Whisper model size: base, small, medium, large (default: base)
+                      Larger models are more accurate but slower
 ```
 
 ## Project Structure
@@ -288,11 +316,13 @@ ingesta/
 │   ├── cli.py           # Command-line interface
 │   └── reports/         # Report generation
 │       ├── __init__.py
-│       ├── xml_parser.py    # Camera XML sidecar parser
-│       ├── thumbnails.py    # Thumbnail extraction
-│       ├── csv_report.py    # CSV report generator
-│       ├── pdf_report.py    # PDF report generator
-│       └── bin_organizer.py # ShotPut-style bin/clip organization
+│       ├── xml_parser.py       # Camera XML sidecar parser
+│       ├── thumbnails.py       # Thumbnail extraction
+│       ├── csv_report.py       # CSV report generator
+│       ├── pdf_report.py       # PDF report generator
+│       ├── bin_organizer.py    # ShotPut-style bin/clip organization
+│       ├── local_transcription.py  # Local audio transcription (whisper.cpp)
+│       └── frame_analysis.py   # Local frame analysis for visual descriptions
 ├── tests/
 │   └── test_*.py
 ├── README.md
@@ -360,6 +390,49 @@ If clips are not in organized folders, bin names are extracted from filenames:
 - **Binned CSV**: Detailed clip list with Bin, Bin Type, and Reel columns
 - **Bin Summary CSV**: Overview of each bin with clip counts and durations
 - **Binned PDF**: Organized by bin sections with bin-level summaries
+
+### Local Transcription
+
+Transcription uses whisper.cpp running entirely on your local machine:
+
+**Security:**
+- Audio is extracted temporarily and processed locally
+- No audio data is uploaded to cloud services
+- Transcription models run on your CPU/GPU
+- No internet connection required
+
+**Features:**
+- Detects slate markers ("Scene 1", "Take 3", etc.)
+- Detects end marks ("Cut", "And cut")
+- Generates excerpt for quick reference
+- Supports multiple languages (auto-detection)
+
+**Models:**
+- `base`: Fast, good accuracy (default)
+- `small`: Better accuracy, moderate speed
+- `medium`: High accuracy, slower
+- `large`: Best accuracy, slowest
+
+### Local Frame Analysis
+
+Frame analysis extracts and analyzes key frames using FFmpeg:
+
+**Security:**
+- Frames are extracted temporarily and analyzed locally
+- No images are uploaded to external services
+- All analysis happens on your machine
+
+**Features:**
+- Estimates shot type (wide, medium, close-up)
+- Detects scene type (interior/exterior)
+- Measures brightness and contrast
+- Detects camera movement
+- Generates human-readable visual descriptions
+
+**Output:**
+- Visual description: "Medium shot interior - static camera"
+- Shot type classification
+- Brightness/contrast scores
 
 ## License
 

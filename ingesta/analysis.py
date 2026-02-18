@@ -56,7 +56,15 @@ class ClipAnalysis:
     motion_score: float  # 0.0 to 1.0, higher = more motion
     audio_score: float   # 0.0 to 1.0, higher = clearer audio
     confidence: float    # 0.0 to 1.0, classification confidence
-    metadata: Dict = None
+    metadata: Optional[Dict] = None
+    # Transcription and visual analysis fields
+    transcription: Optional[str] = None
+    transcription_excerpt: Optional[str] = None
+    has_slate: bool = False
+    has_end_mark: bool = False
+    slate_text: Optional[str] = None
+    visual_description: Optional[str] = None
+    shot_type: Optional[str] = None
     
     def __post_init__(self):
         if self.metadata is None:
@@ -75,6 +83,13 @@ class ClipAnalysis:
             "audio_score": self.audio_score,
             "confidence": self.confidence,
             "metadata": self.metadata,
+            "transcription": self.transcription,
+            "transcription_excerpt": self.transcription_excerpt,
+            "has_slate": self.has_slate,
+            "has_end_mark": self.has_end_mark,
+            "slate_text": self.slate_text,
+            "visual_description": self.visual_description,
+            "shot_type": self.shot_type,
         }
 
 

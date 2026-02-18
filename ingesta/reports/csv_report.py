@@ -37,7 +37,13 @@ class CSVReportGenerator:
         'Confidence',
         'Bin',
         'Bin Type',
-        'Reel'
+        'Reel',
+        'Visual Description',
+        'Shot Type',
+        'Transcription Excerpt',
+        'Has Slate',
+        'Slate Text',
+        'Has End Mark',
     ]
     
     def __init__(self, output_path: Optional[Path] = None):
@@ -166,7 +172,13 @@ class CSVReportGenerator:
             'Confidence': f"{analysis.confidence:.2f}",
             'Bin': "",
             'Bin Type': "",
-            'Reel': ""
+            'Reel': "",
+            'Visual Description': analysis.visual_description or "",
+            'Shot Type': analysis.shot_type or "",
+            'Transcription Excerpt': analysis.transcription_excerpt or "",
+            'Has Slate': 'Yes' if analysis.has_slate else 'No',
+            'Slate Text': analysis.slate_text or "",
+            'Has End Mark': 'Yes' if analysis.has_end_mark else 'No',
         }
         
         return row
