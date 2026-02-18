@@ -24,6 +24,7 @@ from .reports import (
 from .project_manager import ProjectManager, get_project_manager
 from .auto import AutoWorkflow
 from .tui import run_tui_workflow, WorkflowStep
+from .templates import get_template_manager, TemplateType
 
 
 # Setup logging
@@ -1093,6 +1094,99 @@ def project_report(ctx, project_id, output_dir, report_format, include_all_offlo
     
     click.echo(f"\n   Report saved to: {output_path}")
     click.echo(f"   (Full consolidated reporting coming in next update)")
+
+
+# Template Management Commands
+@cli.group()
+def template():
+    """Manage project templates (doc/commercial/wedding)."""
+    pass
+
+
+@template.command('list')
+@click.pass_context
+def template_list(ctx):
+    """List all available project templates."""
+    setup_logging(ctx.obj['verbose'])
+    
+    tm = get_template_manager()
+    templates = tm.list_templates()
+    
+    click.echo("\n📋 Available Project Templates:\n")
+    click.echo(f"{'Name':<20} {'Type':<15} {'Description'}")
+    click.echo("-" * 70)
+    
+    for tmpl in templates:
+        click.echo(f"{tmpl.name:<20} {tmpl.template_type.value:<15} {tmpl.description}")
+    
+    click.echo("\n💡 Use 'ingesta template show <name>' for detailed bin/tag structure")
+
+
+@template.command('show')
+@click.argument('template_name')
+@click.pass_context
+def template_show(ctx, template_name):
+    """Show template details including bins and tags."""
+    setup_logging(ctx.obj['verbose'])
+    
+    tm = get_template_manager()
+    tmpl = tm.get_template_by_name(template_name)
+    
+    if not tmpl:
+        click.echo(f"❌ Template not found: {template_name}", err=True)
+        click.echo("   Use 'ingesta template list' to see available templates")
+        sys.exit(1)
+    
+    click.echo(f"\n📋 Template: {tmpl.name}")
+    click.echo(f"   Type: {tmpl.template_type.value}")
+    click.echo(f"   Description: {tmpl.description}")
+    
+    click.echo(f"\n📁 Bin Structure:")
+    for bin_def in tmpl.bins:
+        click.echo(f"   {bin_def.name}")
+        if bin_def.description:
+            click.echo(f"      └─ {bin_def.description}")
+        for sub in bin_def.sub_bins:
+            click.echo(f"      └─ {sub.name}")
+    
+    click.echo(f"\n🏷️  Key Tags:")
+    for tag in tmpl.tags[:10]:  # Show first 10
+        click.echo(f"   • {tag.name} ({tag.category})")
+    
+    click.echo(f"\n⚙️  Default Settings:")
+    settings = tmpl.settings
+    click.echo(f"   • Transcribe: {'Yes' if settings.transcribe_audio else 'No'}")
+    click.echo(f"   • Generate Proxies: {'Yes' if settings.generate_proxies else 'No'}")
+    click.echo(f"   • Thumbnails: {settings.thumbnail_count} per clip")
+    click.echo(f"   • Export PDF: {'Yes' if settings.export_pdf else 'No'}")
+    click.echo(f"   • Export CSV: {'Yes' if settings.export_csv else 'No'}")
+
+
+@template.command('export')
+@click.argument('template_name')
+@click.option('--output', '-o', type=click.Path(), help='Output JSON file path')
+@click.pass_context
+def template_export(ctx, template_name, output):
+    """Export a template to JSON file."""
+    setup_logging(ctx.obj['verbose'])
+    
+    tm = get_template_manager()
+    tmpl = tm.get_template_by_name(template_name)
+    
+    if not tmpl:
+        click.echo(f"❌ Template not found: {template_name}", err=True)
+        sys.exit(1)
+    
+    if not output:
+        output = f"{tmpl.template_type.value}_template.json"
+    
+    output_path = Path(output)
+    
+    if tm.export_template(tmpl.template_type, output_path):
+        click.echo(f"✅ Exported template: {output_path}")
+    else:
+        click.echo(f"❌ Failed to export template", err=True)
+        sys.exit(1)
 
 
 def main():
