@@ -37,6 +37,8 @@ test_data/
 .pytest_cache/
 .coverage
 htmlcov/
+tests/output/
+tests/output_pdf/
 
 # OS
 .DS_Store
@@ -46,3 +48,6 @@ Thumbs.db
 *.log
 *.db
 .card_tracker.db
+
+# GitHub Actions
+.github/workflows/*.yml~
