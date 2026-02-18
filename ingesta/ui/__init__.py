@@ -7,7 +7,8 @@ Install with UI support: pip install ingesta[ui]
 try:
     from .app import main
     from .main_window import IngestaMainWindow
-    __all__ = ['main', 'IngestaMainWindow']
+    from .sync_dialog import SyncSourceDialog
+    __all__ = ['main', 'IngestaMainWindow', 'SyncSourceDialog']
 except ImportError:
     # PySide6 not installed, UI unavailable
     def main():
@@ -18,4 +19,5 @@ except ImportError:
         sys.exit(1)
     
     IngestaMainWindow = None
-    __all__ = ['main', 'IngestaMainWindow']
+    SyncSourceDialog = None
+    __all__ = ['main', 'IngestaMainWindow', 'SyncSourceDialog']

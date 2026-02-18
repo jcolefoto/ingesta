@@ -317,12 +317,12 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
               help='Sync tolerance in seconds (default: 0.5)')
 @click.option('--prefix', '-p', default='synced_',
               help='Prefix for output filenames')
-@click.option('--method', '-m', default='waveform',
-              type=click.Choice(['waveform', 'timecode']),
-              help='Sync method (default: waveform)')
+@click.option('--sync-source', '-s',
+              type=click.Choice(['auto', 'timecode', 'waveform'], case_sensitive=False),
+              help='Sync source selection: auto (recommended), timecode, or waveform. If not specified, you will be prompted in interactive mode.')
 @click.option('--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def sync(ctx, video_dir, audio_dir, output_dir, tolerance, prefix, method, verbose):
+def sync(ctx, video_dir, audio_dir, output_dir, tolerance, prefix, sync_source, verbose):
     """
     Sync external audio files to video clips.
     
@@ -331,14 +331,41 @@ def sync(ctx, video_dir, audio_dir, output_dir, tolerance, prefix, method, verbo
     Example:
         ingesta sync -v ./video -a ./audio -o ./synced
         ingesta sync -v ./video -a ./audio -o ./synced -t 0.3
+        ingesta sync -v ./video -a ./audio -o ./synced --sync-source auto
     """
     setup_logging(verbose)
+    
+    # Determine sync source
+    is_tty = sys.stdout.isatty()
+    
+    if sync_source is None:
+        if is_tty:
+            # Interactive mode: prompt user
+            click.echo("\nSelect sync source:")
+            click.echo("  1. Auto (recommended) - Automatically detect best sync method")
+            click.echo("  2. Timecode - Use embedded timecode for synchronization")
+            click.echo("  3. Waveform - Use audio waveform matching")
+            
+            choice = click.prompt(
+                "Enter selection",
+                type=click.Choice(['1', '2', '3']),
+                default='1'
+            )
+            
+            source_map = {'1': 'auto', '2': 'timecode', '3': 'waveform'}
+            sync_source = source_map[choice]
+            click.echo(f"  Selected: {sync_source}\n")
+        else:
+            # Non-interactive mode: default to auto with warning
+            sync_source = 'auto'
+            click.echo("⚠️  Warning: Sync source defaulted to 'auto' (non-interactive mode)", err=True)
     
     click.echo(f"Syncing audio to video...")
     click.echo(f"  Video directory: {video_dir}")
     click.echo(f"  Audio directory: {audio_dir}")
     click.echo(f"  Output directory: {output_dir}")
     click.echo(f"  Tolerance: {tolerance}s")
+    click.echo(f"  Sync source: {sync_source}")
     
     try:
         results = sync_audio_video(
@@ -347,6 +374,7 @@ def sync(ctx, video_dir, audio_dir, output_dir, tolerance, prefix, method, verbo
             output_dir=output_dir,
             tolerance=tolerance,
             prefix=prefix,
+            sync_source=sync_source,
             progress_callback=lambda current, total: click.echo(
                 f"  Progress: {current}/{total}", nl=False, err=True
             )

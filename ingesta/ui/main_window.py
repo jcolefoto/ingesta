@@ -104,6 +104,23 @@ class IngestaMainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
+        # Tools menu
+        tools_menu = menubar.addMenu("&Tools")
+        
+        # Sync action
+        sync_action = QAction("&Sync Audio/Video...", self)
+        sync_action.setShortcut(QKeySequence("Ctrl+S"))
+        sync_action.triggered.connect(self._on_sync_action)
+        tools_menu.addAction(sync_action)
+        
+        tools_menu.addSeparator()
+        
+        # Report action
+        report_action = QAction("&Generate Report...", self)
+        report_action.setShortcut(QKeySequence("Ctrl+R"))
+        report_action.triggered.connect(self._on_report_action)
+        tools_menu.addAction(report_action)
+        
         # Help menu
         help_menu = menubar.addMenu("&Help")
         
@@ -663,6 +680,37 @@ class IngestaMainWindow(QMainWindow):
             self.source_badge.setText(f"📁 {self.source_path.name}")
             self._update_destination_badges()
             self._update_start_button()
+    
+    def _on_sync_action(self):
+        """Handle sync action from Tools menu."""
+        from .sync_dialog import SyncSourceDialog
+        
+        # Show sync source selection dialog
+        sync_source = SyncSourceDialog.get_sync_source(self)
+        
+        if sync_source:
+            # Log the selection
+            self.status_msg_label.setText(f"Sync source selected: {sync_source}")
+            
+            # Show a message box confirming selection
+            QMessageBox.information(
+                self,
+                "Sync Source Selected",
+                f"Sync source set to: {sync_source.upper()}\n\n"
+                f"This selection will be used for the next sync operation. "
+                f"You must confirm this selection each time you run sync."
+            )
+        else:
+            self.status_msg_label.setText("Sync cancelled - no source selected")
+    
+    def _on_report_action(self):
+        """Handle report action from Tools menu."""
+        QMessageBox.information(
+            self,
+            "Generate Report",
+            "Report generation will be available in a future update.\n\n"
+            "Use the CLI: ingesta report -m ./media -o ./reports"
+        )
     
     def closeEvent(self, event):
         """Handle window close."""

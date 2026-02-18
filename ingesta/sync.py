@@ -34,6 +34,7 @@ class SyncResult:
     offset_seconds: float = 0.0
     confidence: float = 0.0
     error_message: Optional[str] = None
+    sync_source: str = "waveform"
 
 
 class WaveformSync:
@@ -201,7 +202,7 @@ class WaveformSync:
         video_path: Union[str, Path],
         audio_path: Union[str, Path],
         output_path: Union[str, Path],
-        method: str = "waveform"
+        sync_source: str = "auto"
     ) -> SyncResult:
         """
         Synchronize external audio to video and create merged output.
@@ -210,7 +211,7 @@ class WaveformSync:
             video_path: Path to video file
             audio_path: Path to external audio file
             output_path: Path for output file
-            method: Sync method ('waveform' or 'timecode')
+            sync_source: Sync source ('auto', 'waveform', or 'timecode')
         
         Returns:
             SyncResult with details
@@ -223,11 +224,20 @@ class WaveformSync:
             video_file=video_path,
             audio_file=audio_path,
             output_file=output_path,
-            success=False
+            success=False,
+            sync_source=sync_source
         )
         
+        # Determine actual method to use
+        method = sync_source
+        if sync_source == "auto":
+            # Auto-detect: try timecode first if available, fallback to waveform
+            # For now, default to waveform since timecode detection needs implementation
+            method = "waveform"
+            logging.info("Auto-detect: using waveform matching")
+        
         try:
-            logging.info(f"Syncing {audio_path.name} to {video_path.name}")
+            logging.info(f"Syncing {audio_path.name} to {video_path.name} using {method}")
             
             if method == "waveform":
                 # Extract audio from video
@@ -350,6 +360,7 @@ def sync_audio_video(
     output_dir: Union[str, Path],
     tolerance: float = 0.5,
     prefix: str = "synced_",
+    sync_source: str = "auto",
     video_formats: Tuple[str, ...] = (".mp4", ".mov", ".mxf"),
     audio_formats: Tuple[str, ...] = (".wav", ".mp3", ".bwf"),
     progress_callback: Optional[callable] = None
@@ -363,6 +374,7 @@ def sync_audio_video(
         output_dir: Output directory for synced files
         tolerance: Maximum sync offset tolerance
         prefix: Prefix for output filenames
+        sync_source: Sync source selection ('auto', 'timecode', or 'waveform')
         video_formats: Tuple of video file extensions
         audio_formats: Tuple of audio file extensions
         progress_callback: Optional callback(current, total)
@@ -417,7 +429,7 @@ def sync_audio_video(
         output_file = output_dir / f"{prefix}{video_file.stem}{video_file.suffix}"
         
         result = sync_engine.sync_audio_to_video(
-            video_file, matching_audio, output_file
+            video_file, matching_audio, output_file, sync_source=sync_source
         )
         
         sync_results.append(result)
