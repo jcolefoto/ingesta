@@ -35,6 +35,9 @@ except ImportError:
     PREMIERE_AVAILABLE = False
     create_premiere_project = None
 
+# Workflow orchestrator (Phase 1A)
+from . import workflow
+
 __all__ = [
     "calculate_checksum",
     "verify_checksum",

@@ -139,6 +139,27 @@ A professional-grade media ingestion tool with verified media offloading, audio 
 - **CLI --profile flag** for easy selection
 - Automatic configuration of features based on profile
 
+### 10. Workflow Orchestrator
+- **Event-driven pipeline system** for structured media processing
+- **Composable workflow steps** with lifecycle hooks and progress tracking
+- **Pub/sub event bus** for loose coupling between components
+- **Workflow engine** for sequential step execution with error handling
+- **Shared context** for passing data between steps
+- **Built-in ingest step** wrapping the core ingestion functionality
+- **Extensible architecture** for custom workflow steps
+
+```python
+from ingesta.workflow import WorkflowEngine, WorkflowContext, IngestStep
+from ingesta.workflow.events import EventBus, EventType
+
+# Build and run a workflow
+engine = WorkflowEngine(steps=[IngestStep()])
+context = WorkflowContext()
+context.set("source", "/path/to/media")
+context.set("destinations", ["/backup"])
+result = engine.run(context)
+```
+
 ## Installation
 
 ```bash
