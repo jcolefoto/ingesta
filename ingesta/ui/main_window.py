@@ -1,4 +1,11 @@
-"""Main window for ingesta PySide6 UI."""
+"""Main window for ingesta PySide6 UI - Three panel layout.
+
+Layout:
+- Left: Workflow steps sidebar
+- Center: Active module (ingestion form, progress, next steps)
+- Right: Workflow status + history panel
+- Footer: Status line
+"""
 
 import sys
 import shutil
@@ -8,50 +15,55 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QPushButton, QProgressBar, QFrame,
     QSplitter, QMessageBox, QApplication, QMenuBar,
-    QMenu, QStatusBar, QSizePolicy
+    QMenu, QStatusBar, QSizePolicy, QStackedWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 
 from .drop_zones import SourceDropZone, DestinationDropZone
 from .history_panel import HistoryPanel, HistoryItem
+from .workflow_steps import WorkflowStepsPanel, WorkflowStep
+from .workflow_status_panel import WorkflowStatusPanel
+from .next_steps_panel import NextStepsPanel
+from .checksum_dialog import ChecksumSelectionDialog
 from .styles import DARK_STYLESHEET, SAFE_BADGE_STYLE, FAIL_BADGE_STYLE, WARNING_BADGE_STYLE
 
 
 class IngestionWorker(QThread):
     """Worker thread for running ingestion."""
-    
+
     progress = Signal(object)  # ProgressEvent
     completed = Signal(object)  # IngestionCompletion
     error = Signal(str)
-    
-    def __init__(self, source: Path, destinations: List[Path]):
+
+    def __init__(self, source: Path, destinations: List[Path], checksum_algorithm: str = "xxhash64"):
         super().__init__()
         self.source = source
         self.destinations = destinations
+        self.checksum_algorithm = checksum_algorithm
         self._is_running = True
-    
+
     def run(self):
         """Run the ingestion."""
         try:
             from ..ingestion import ingest_media
-            
+
             def progress_callback(event):
                 if self._is_running:
                     self.progress.emit(event)
-            
+
             job = ingest_media(
                 source=self.source,
                 destinations=[str(p) for p in self.destinations],
-                checksum_algorithm="xxhash64",
+                checksum_algorithm=self.checksum_algorithm,
                 verify=True,
                 progress_event_callback=progress_callback
             )
-            
+
             if self._is_running:
                 completion = job.get_completion()
                 self.completed.emit(completion)
-                
+
         except Exception as e:
             if self._is_running:
                 self.error.emit(str(e))
@@ -63,12 +75,12 @@ class IngestionWorker(QThread):
 
 
 class IngestaMainWindow(QMainWindow):
-    """Main window for ingesta desktop UI."""
+    """Main window for ingesta desktop UI with three-panel layout."""
     
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Ingesta - Media Ingestion Tool")
-        self.setMinimumSize(900, 700)
+        self.setMinimumSize(1200, 800)
         
         self.source_path: Optional[Path] = None
         self.dest_paths: List[Path] = []
@@ -76,12 +88,14 @@ class IngestaMainWindow(QMainWindow):
         self.current_history_item: Optional[HistoryItem] = None
         self.total_files: int = 0
         self.total_size_bytes: int = 0
-        
+        self.checksum_algorithm: str = "xxhash64"  # Default checksum algorithm
+
         self._setup_menu_bar()
         self._setup_ui()
         self._setup_status_bar()
-        self._update_start_button()
         self._setup_shortcuts()
+        self._update_start_button()
+        self._update_workflow_step()
     
     def _setup_menu_bar(self):
         """Setup menu bar with File and Help menus."""
@@ -130,21 +144,30 @@ class IngestaMainWindow(QMainWindow):
         help_menu.addAction(about_action)
     
     def _setup_status_bar(self):
-        """Setup status bar with file info."""
+        """Setup footer status bar."""
         self.status_bar = QStatusBar()
+        self.status_bar.setStyleSheet("""
+            QStatusBar {
+                background-color: #0f172a;
+                border-top: 1px solid #1e293b;
+                color: #888;
+                padding: 4px 16px;
+            }
+        """)
         self.setStatusBar(self.status_bar)
         
-        # File count label
-        self.status_files_label = QLabel("Files: 0")
-        self.status_bar.addWidget(self.status_files_label)
+        # Status message (left)
+        self.footer_status = QLabel("Ready")
+        self.footer_status.setStyleSheet("color: #aaa;")
+        self.status_bar.addWidget(self.footer_status)
         
-        # Size label
-        self.status_size_label = QLabel("Size: 0 GB")
-        self.status_bar.addWidget(self.status_size_label)
+        # Spacer
+        self.status_bar.addStretch()
         
-        # Status message
-        self.status_msg_label = QLabel("Ready")
-        self.status_bar.addPermanentWidget(self.status_msg_label)
+        # Stats (right side)
+        self.footer_stats = QLabel("")
+        self.footer_stats.setStyleSheet("color: #666; font-size: 11px;")
+        self.status_bar.addPermanentWidget(self.footer_stats)
     
     def _setup_shortcuts(self):
         """Setup keyboard shortcuts."""
@@ -174,19 +197,43 @@ class IngestaMainWindow(QMainWindow):
         self.dest_paths = []
         self.total_files = 0
         self.total_size_bytes = 0
-        
+        self.checksum_algorithm = "xxhash64"  # Reset to default
+
         self.source_zone.clear()
         self.dest_zone.clear()
-        self.source_badge.setText("No source selected")
-        self._update_destination_badges()
+
         self._update_start_button()
-        self._update_status_bar()
+        self._update_workflow_step()
+        self._update_footer_status("Ready")
+
+        # Hide next steps if visible
+        self.next_steps_panel.hide_panel()
+
+        # Reset workflow progress
+        self.workflow_steps.reset_progress()
     
-    def _update_status_bar(self):
-        """Update status bar labels."""
-        self.status_files_label.setText(f"Files: {self.total_files}")
-        size_gb = self.total_size_bytes / (1024**3)
-        self.status_size_label.setText(f"Size: {size_gb:.2f} GB")
+    def _update_footer_status(self, message: str):
+        """Update footer status line."""
+        self.footer_status.setText(message)
+    
+    def _update_footer_stats(self):
+        """Update footer statistics display."""
+        parts = []
+
+        if self.source_path:
+            src_count, src_size = self.source_zone.get_total_stats()
+            parts.append(f"Source: {src_count} clips, {src_size / (1024**3):.2f} GB")
+
+        if self.dest_paths:
+            parts.append(f"Destinations: {len(self.dest_paths)}")
+
+        # Always show checksum algorithm (with default)
+        parts.append(f"Verification: {self.checksum_algorithm.upper()}")
+
+        if parts:
+            self.footer_stats.setText(" | ".join(parts))
+        else:
+            self.footer_stats.setText(f"Verification: {self.checksum_algorithm.upper()}")
     
     def _show_about(self):
         """Show about dialog."""
@@ -200,63 +247,60 @@ class IngestaMainWindow(QMainWindow):
         )
     
     def _setup_ui(self):
-        """Setup the main UI."""
+        """Setup the main three-panel UI."""
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
         
-        # Main layout with splitter
-        main_layout = QHBoxLayout(central)
+        # Main layout
+        main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Horizontal splitter for three panels
+        h_splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # Left panel - main content
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(20, 20, 20, 20)
-        left_layout.setSpacing(16)
+        # === LEFT PANEL: Workflow Steps ===
+        self.workflow_steps = WorkflowStepsPanel()
+        self.workflow_steps.stepClicked.connect(self._on_workflow_step_clicked)
+        h_splitter.addWidget(self.workflow_steps)
+        
+        # === CENTER PANEL: Active Module ===
+        center_panel = QWidget()
+        center_layout = QVBoxLayout(center_panel)
+        center_layout.setContentsMargins(20, 20, 20, 20)
+        center_layout.setSpacing(16)
         
         # Header
         header = QLabel("Ingesta")
         header.setObjectName("title")
-        left_layout.addWidget(header)
+        center_layout.addWidget(header)
         
         subtitle = QLabel("Media Ingestion & Verification")
         subtitle.setStyleSheet("color: #888; margin-bottom: 10px;")
-        left_layout.addWidget(subtitle)
+        center_layout.addWidget(subtitle)
         
         # Source section
         source_label = QLabel("SOURCE")
         source_label.setObjectName("section-title")
-        left_layout.addWidget(source_label)
+        center_layout.addWidget(source_label)
         
         self.source_zone = SourceDropZone()
         self.source_zone.filesDropped.connect(self._on_source_dropped)
+        self.source_zone.filesChanged.connect(self._on_source_changed)
         self.source_zone.set_validation_callback(self._validate_source)
-        left_layout.addWidget(self.source_zone)
-        
-        # Source badge
-        self.source_badge = QLabel("No source selected")
-        self.source_badge.setObjectName("badge-info")
-        self.source_badge.setStyleSheet("QLabel { background-color: #2d3a5a; color: #60a5fa; padding: 6px 12px; border-radius: 12px; font-size: 11px; font-weight: bold; }")
-        left_layout.addWidget(self.source_badge, alignment=Qt.AlignmentFlag.AlignLeft)
+        center_layout.addWidget(self.source_zone)
         
         # Destination section
         dest_label = QLabel("DESTINATIONS")
         dest_label.setObjectName("section-title")
-        left_layout.addWidget(dest_label)
+        center_layout.addWidget(dest_label)
         
         self.dest_zone = DestinationDropZone()
         self.dest_zone.filesDropped.connect(self._on_destinations_dropped)
+        self.dest_zone.filesChanged.connect(self._on_destinations_changed)
         self.dest_zone.set_validation_callback(self._validate_destinations)
-        left_layout.addWidget(self.dest_zone)
-        
-        # Destination badges
-        self.dest_badges_layout = QHBoxLayout()
-        self.dest_badges_layout.setSpacing(8)
-        left_layout.addLayout(self.dest_badges_layout)
+        center_layout.addWidget(self.dest_zone)
         
         # Progress section
         self.progress_frame = QFrame()
@@ -296,7 +340,7 @@ class IngestaMainWindow(QMainWindow):
         progress_layout.addWidget(self.status_badge)
         
         self.progress_frame.setVisible(False)
-        left_layout.addWidget(self.progress_frame)
+        center_layout.addWidget(self.progress_frame)
         
         # Action buttons
         button_layout = QHBoxLayout()
@@ -317,73 +361,111 @@ class IngestaMainWindow(QMainWindow):
         self.cancel_btn.clicked.connect(self._on_cancel)
         button_layout.addWidget(self.cancel_btn)
         
-        left_layout.addLayout(button_layout)
+        center_layout.addLayout(button_layout)
         
-        left_layout.addStretch()
+        # Next Steps Panel (initially hidden)
+        self.next_steps_panel = NextStepsPanel()
+        self.next_steps_panel.stepActionClicked.connect(self._on_next_step_action)
+        self.next_steps_panel.dismissed.connect(self._on_next_steps_dismissed)
+        center_layout.addWidget(self.next_steps_panel)
         
-        # Right panel - history
+        center_layout.addStretch()
+        
+        h_splitter.addWidget(center_panel)
+        
+        # === RIGHT PANEL: Workflow Status + History ===
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        
+        # Workflow status panel
+        self.workflow_status = WorkflowStatusPanel()
+        right_layout.addWidget(self.workflow_status, stretch=1)
+        
+        # History panel (moved to bottom of right panel)
         self.history_panel = HistoryPanel()
+        self.history_panel.setMaximumHeight(250)
         self.history_panel.itemSelected.connect(self._on_history_selected)
         self.history_panel.itemDropped.connect(self._on_history_drop)
+        right_layout.addWidget(self.history_panel)
         
-        # Add to splitter
-        splitter.addWidget(left_panel)
-        splitter.addWidget(self.history_panel)
-        splitter.setSizes([650, 250])
-        splitter.setStretchFactor(0, 1)
+        h_splitter.addWidget(right_panel)
         
-        main_layout.addWidget(splitter)
+        # Set splitter sizes (left, center, right)
+        h_splitter.setSizes([240, 600, 300])
+        h_splitter.setStretchFactor(0, 0)
+        h_splitter.setStretchFactor(1, 1)
+        h_splitter.setStretchFactor(2, 0)
+        
+        main_layout.addWidget(h_splitter, stretch=1)
+    
+    def _on_workflow_step_clicked(self, step: WorkflowStep):
+        """Handle workflow step click."""
+        # Could navigate to different views in the future
+        pass
+    
+    def _update_workflow_step(self):
+        """Update current workflow step based on state."""
+        if self.current_worker and self.current_worker.isRunning():
+            self.workflow_steps.set_current_step(WorkflowStep.INGEST)
+            self.workflow_status.set_status("Ingesting", "Copying and verifying media files")
+        elif self.next_steps_panel.is_visible():
+            self.workflow_steps.set_current_step(WorkflowStep.COMPLETE)
+            self.workflow_steps.mark_step_complete(WorkflowStep.INGEST)
+            self.workflow_status.set_status("Complete", "Ingestion finished successfully")
+        elif self.dest_paths and self.source_path:
+            self.workflow_steps.set_current_step(WorkflowStep.INGEST)
+            self.workflow_steps.mark_step_complete(WorkflowStep.SOURCE)
+            self.workflow_steps.mark_step_complete(WorkflowStep.DESTINATIONS)
+            self.workflow_status.set_status("Ready to Ingest", "All set to start copying")
+        elif self.source_path:
+            self.workflow_steps.set_current_step(WorkflowStep.DESTINATIONS)
+            self.workflow_steps.mark_step_complete(WorkflowStep.SOURCE)
+            self.workflow_status.set_status("Select Destinations", "Choose where to copy the media")
+        else:
+            self.workflow_steps.set_current_step(WorkflowStep.SOURCE)
+            self.workflow_status.set_status("Select Source", "Choose media to ingest")
     
     def _on_source_dropped(self, paths: List[Path]):
         """Handle source drop."""
         if paths:
             self.source_path = paths[0]
-            self.source_badge.setText(f"📁 {self.source_path.name}")
-            
-            # Calculate file count and size
-            try:
-                if self.source_path.is_dir():
-                    files = [f for f in self.source_path.rglob('*') if f.is_file()]
-                    self.total_files = len(files)
-                    self.total_size_bytes = sum(f.stat().st_size for f in files)
-                else:
-                    self.total_files = 1
-                    self.total_size_bytes = self.source_path.stat().st_size
-            except Exception:
-                self.total_files = 0
-                self.total_size_bytes = 0
-            
-            self._update_status_bar()
+            self.total_files, self.total_size_bytes = self.source_zone.get_total_stats()
+            self._update_workflow_step()
             self._update_start_button()
+            self._update_footer_stats()
+            self._update_footer_status(f"Source selected: {self.source_path.name}")
+    
+    def _on_source_changed(self):
+        """Handle source selection change."""
+        paths = self.source_zone.dropped_paths
+        if paths:
+            self.source_path = paths[0]
+            self.total_files, self.total_size_bytes = self.source_zone.get_total_stats()
+        else:
+            self.source_path = None
+            self.total_files = 0
+            self.total_size_bytes = 0
+        
+        self._update_workflow_step()
+        self._update_start_button()
+        self._update_footer_stats()
     
     def _on_destinations_dropped(self, paths: List[Path]):
         """Handle destinations drop."""
         self.dest_paths = paths
-        self._update_destination_badges()
+        self._update_workflow_step()
         self._update_start_button()
+        self._update_footer_stats()
+        self._update_footer_status(f"{len(paths)} destination(s) selected")
     
-    def _update_destination_badges(self):
-        """Update destination badges display."""
-        # Clear existing
-        while self.dest_badges_layout.count():
-            item = self.dest_badges_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        
-        # Add badges
-        if not self.dest_paths:
-            badge = QLabel("No destinations")
-            badge.setStyleSheet("QLabel { background-color: #2d3a5a; color: #60a5fa; padding: 6px 12px; border-radius: 12px; font-size: 11px; font-weight: bold; }")
-            self.dest_badges_layout.addWidget(badge)
-        else:
-            for path in self.dest_paths:
-                badge = QLabel(f"💾 {path.name}")
-                badge.setStyleSheet("QLabel { background-color: #2d5a3d; color: #4ade80; padding: 6px 12px; border-radius: 12px; font-size: 11px; font-weight: bold; }")
-                badge.setToolTip(str(path))
-                self.dest_badges_layout.addWidget(badge)
-            
-            self.dest_badges_layout.addStretch()
+    def _on_destinations_changed(self):
+        """Handle destinations selection change."""
+        self.dest_paths = self.dest_zone.dropped_paths
+        self._update_workflow_step()
+        self._update_start_button()
+        self._update_footer_stats()
     
     def _validate_source(self, path: Path) -> tuple:
         """Validate source path."""
@@ -396,10 +478,8 @@ class IngestaMainWindow(QMainWindow):
         # Check readability
         try:
             if path.is_dir():
-                # Try to list directory
                 next(path.iterdir(), None)
             else:
-                # Try to read first byte
                 with open(path, 'rb') as f:
                     f.read(1)
         except PermissionError:
@@ -407,7 +487,7 @@ class IngestaMainWindow(QMainWindow):
         except Exception as e:
             return (False, f"Cannot read: {e}")
         
-        # Calculate size with error handling for permission errors
+        # Calculate size
         try:
             if path.is_dir():
                 total_size = 0
@@ -417,7 +497,6 @@ class IngestaMainWindow(QMainWindow):
                         try:
                             total_size += f.stat().st_size
                             file_count += 1
-                            # Limit to prevent hanging on huge directories
                             if file_count > 100000:
                                 return (True, f"Valid (>{100000} files)")
                         except (OSError, PermissionError):
@@ -468,7 +547,6 @@ class IngestaMainWindow(QMainWindow):
                 usage = shutil.disk_usage(path)
                 free_gb = usage.free / (1024**3)
                 
-                # Calculate source size if available
                 if self.source_path:
                     try:
                         if self.source_path.is_dir():
@@ -499,10 +577,24 @@ class IngestaMainWindow(QMainWindow):
         self.start_btn.setEnabled(can_start)
     
     def _on_start(self):
-        """Start ingestion."""
+        """Start ingestion - show checksum selection dialog first."""
         if not self.source_path or not self.dest_paths:
             return
-        
+
+        # Show checksum selection dialog (mandatory)
+        selected_algo = ChecksumSelectionDialog.get_algorithm(
+            parent=self,
+            default=self.checksum_algorithm
+        )
+
+        if selected_algo is None:
+            # User cancelled - don't start ingestion
+            self._update_footer_status("Ingestion cancelled - no verification method selected")
+            return
+
+        # Store selected algorithm
+        self.checksum_algorithm = selected_algo
+
         # Create history item
         self.current_history_item = HistoryItem(
             source=self.source_path,
@@ -512,15 +604,24 @@ class IngestaMainWindow(QMainWindow):
             total_size_bytes=self.total_size_bytes
         )
         self.history_panel.add_item(self.current_history_item)
-        
+
         # Update UI
         self.start_btn.setVisible(False)
         self.cancel_btn.setVisible(True)
         self.progress_frame.setVisible(True)
         self.status_badge.setVisible(False)
-        
-        # Start worker
-        self.current_worker = IngestionWorker(self.source_path, self.dest_paths)
+        self.next_steps_panel.hide_panel()
+
+        # Update workflow step
+        self._update_workflow_step()
+        self._update_footer_status(f"Ingesting with {self.checksum_algorithm.upper()} verification...")
+
+        # Start worker with selected checksum algorithm
+        self.current_worker = IngestionWorker(
+            self.source_path,
+            self.dest_paths,
+            checksum_algorithm=self.checksum_algorithm
+        )
         self.current_worker.progress.connect(self._on_progress)
         self.current_worker.completed.connect(self._on_completed)
         self.current_worker.error.connect(self._on_error)
@@ -541,6 +642,9 @@ class IngestaMainWindow(QMainWindow):
             
             self.start_btn.setVisible(True)
             self.cancel_btn.setVisible(False)
+            
+            self._update_workflow_step()
+            self._update_footer_status("Ingestion cancelled")
     
     def _on_progress(self, event):
         """Handle progress update."""
@@ -551,7 +655,6 @@ class IngestaMainWindow(QMainWindow):
             self.progress_bar.setProperty("phase", "copying")
             
             if event.total_source_files > 0:
-                # Calculate overall progress
                 files_progress = event.current_file_index / event.total_source_files
                 if event.total_bytes > 0:
                     file_progress = event.bytes_copied / event.total_bytes
@@ -564,6 +667,7 @@ class IngestaMainWindow(QMainWindow):
                 self.progress_bar.setFormat(
                     f"Copying {event.source_file.name} ({event.current_file_index + 1}/{event.total_source_files})"
                 )
+                self._update_footer_status(f"Copying: {event.source_file.name}")
             
             if event.current_speed_mb_s:
                 self.speed_label.setText(f"Speed: {event.current_speed_mb_s:.1f} MB/s")
@@ -578,19 +682,19 @@ class IngestaMainWindow(QMainWindow):
             self.progress_bar.setProperty("phase", "verifying")
             
             if event.total_source_files > 0:
-                # Verification is 50-100%
                 progress = 50 + (event.current_file_index / event.total_source_files) * 50
                 self.progress_bar.setValue(int(progress))
             
             if event.source_file:
                 self.progress_bar.setFormat(f"Verifying {event.source_file.name}")
+                self._update_footer_status(f"Verifying: {event.source_file.name}")
         
         elif event.stage == IngestionStage.COMPLETE:
             self.progress_bar.setValue(100)
             self.progress_bar.setFormat("Complete")
     
     def _on_completed(self, completion):
-        """Handle completion."""
+        """Handle completion - show next steps panel."""
         self.current_worker = None
         
         # Update history
@@ -601,7 +705,6 @@ class IngestaMainWindow(QMainWindow):
         # Update UI
         self.start_btn.setVisible(True)
         self.cancel_btn.setVisible(False)
-        
         self.progress_label.setText("Complete")
         
         # Show status badge
@@ -617,14 +720,57 @@ class IngestaMainWindow(QMainWindow):
                 self.status_badge.setText("⚠ DO NOT FORMAT - Not verified")
             self.status_badge.setStyleSheet(FAIL_BADGE_STYLE)
         
-        # Reset for next
+        # Show next steps panel
+        self.next_steps_panel.show_panel(self.source_path, self.dest_paths)
+        
+        # Update workflow step
+        self._update_workflow_step()
+        self._update_footer_status("Ingestion complete - Next steps available")
+        
+        # Reset for next (but keep showing completion state)
+        # Don't clear immediately - let user see the completion state
+    
+    def _on_next_step_action(self, step_id: str):
+        """Handle next step action."""
+        if step_id == "verify":
+            self._update_footer_status("Opening destinations for verification...")
+            # Could open file manager to destinations
+        elif step_id == "report":
+            self._on_report_action()
+        elif step_id == "format":
+            reply = QMessageBox.warning(
+                self,
+                "Format Media",
+                "⚠️ WARNING: This will erase all data on the source media.\n\n"
+                "Have you verified that all files were copied correctly to ALL destinations?\n\n"
+                "This action cannot be undone.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._update_footer_status("Formatting media... (not implemented)")
+        else:
+            QMessageBox.information(
+                self,
+                "Coming Soon",
+                f"The '{step_id}' feature will be available in a future update."
+            )
+    
+    def _on_next_steps_dismissed(self):
+        """Handle next steps panel dismissal."""
+        # Reset the form for next ingestion
         self.source_path = None
         self.dest_paths = []
+        self.checksum_algorithm = "xxhash64"  # Reset to default
         self.source_zone.clear()
         self.dest_zone.clear()
-        self.source_badge.setText("No source selected")
-        self._update_destination_badges()
+        self.progress_frame.setVisible(False)
+        self.status_badge.setVisible(False)
+        self.workflow_steps.reset_progress()
+        self._update_workflow_step()
         self._update_start_button()
+        self._update_footer_stats()
+        self._update_footer_status("Ready for next ingestion")
     
     def _on_error(self, error_msg: str):
         """Handle error."""
@@ -640,6 +786,9 @@ class IngestaMainWindow(QMainWindow):
         self.status_badge.setText(f"✗ ERROR: {error_msg}")
         self.status_badge.setStyleSheet(WARNING_BADGE_STYLE)
         
+        self._update_workflow_step()
+        self._update_footer_status(f"Error: {error_msg}")
+        
         QMessageBox.critical(self, "Ingestion Error", f"An error occurred:\n{error_msg}")
     
     def _on_history_selected(self, item: HistoryItem):
@@ -651,60 +800,58 @@ class IngestaMainWindow(QMainWindow):
         self.source_zone.set_paths([self.source_path])
         self.dest_zone.set_paths(self.dest_paths)
         
-        self.source_badge.setText(f"📁 {self.source_path.name}")
-        self._update_destination_badges()
+        self.total_files = item.file_count
+        self.total_size_bytes = item.total_size_bytes
+        
+        self._update_workflow_step()
         self._update_start_button()
+        self._update_footer_stats()
+        self._update_footer_status(f"Loaded from history: {item.source.name}")
     
     def _on_history_drop(self, paths: List[Path]):
         """Handle drop on history panel for quick-create."""
-        # Auto-detect source vs destinations based on number
         if len(paths) == 1:
-            # Single item - assume source, ask for destinations
             self.source_path = paths[0]
             self.source_zone.set_paths([self.source_path])
-            self.source_badge.setText(f"📁 {self.source_path.name}")
+            self._update_workflow_step()
             self._update_start_button()
+            self._update_footer_stats()
             
             QMessageBox.information(
                 self, "Source Selected",
                 f"Set source to: {self.source_path.name}\n\nNow drop destinations in the main area."
             )
         elif len(paths) >= 2:
-            # Multiple items - first is source, rest are destinations
             self.source_path = paths[0]
             self.dest_paths = paths[1:]
             
             self.source_zone.set_paths([self.source_path])
             self.dest_zone.set_paths(self.dest_paths)
             
-            self.source_badge.setText(f"📁 {self.source_path.name}")
-            self._update_destination_badges()
+            self._update_workflow_step()
             self._update_start_button()
+            self._update_footer_stats()
     
     def _on_sync_action(self):
         """Handle sync action from Tools menu."""
         from .sync_dialog import SyncSourceDialog
         
-        # Show sync source selection dialog
         sync_source = SyncSourceDialog.get_sync_source(self)
         
         if sync_source:
-            # Log the selection
-            self.status_msg_label.setText(f"Sync source selected: {sync_source}")
-            
-            # Show a message box confirming selection
+            self._update_footer_status(f"Sync source selected: {sync_source}")
             QMessageBox.information(
                 self,
                 "Sync Source Selected",
                 f"Sync source set to: {sync_source.upper()}\n\n"
-                f"This selection will be used for the next sync operation. "
-                f"You must confirm this selection each time you run sync."
+                f"This selection will be used for the next sync operation."
             )
         else:
-            self.status_msg_label.setText("Sync cancelled - no source selected")
+            self._update_footer_status("Sync cancelled")
     
     def _on_report_action(self):
         """Handle report action from Tools menu."""
+        self._update_footer_status("Report generation...")
         QMessageBox.information(
             self,
             "Generate Report",

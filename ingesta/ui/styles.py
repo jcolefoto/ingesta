@@ -306,3 +306,69 @@ WARNING_BADGE_STYLE = """
     font-size: 14px;
     font-weight: bold;
 """
+
+# Workflow step styles
+WORKFLOW_STEP_ACTIVE = """
+    background-color: #1e3a5f;
+    border-left: 3px solid #3b82f6;
+"""
+
+WORKFLOW_STEP_COMPLETE = """
+    background-color: transparent;
+    border-left: 3px solid #22c55e;
+"""
+
+WORKFLOW_STEP_INACTIVE = """
+    background-color: transparent;
+    border-left: 3px solid transparent;
+"""
+
+# Feature badge styles
+FEATURE_BADGE_STABLE = """
+    background-color: #166534;
+    color: #86efac;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: bold;
+"""
+
+FEATURE_BADGE_BETA = """
+    background-color: #713f12;
+    color: #fde047;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: bold;
+"""
+
+FEATURE_BADGE_ALPHA = """
+    background-color: #7f1d1d;
+    color: #fca5a5;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: bold;
+"""
+
+# Footer styles
+FOOTER_STYLE = """
+    background-color: #0f172a;
+    border-top: 1px solid #1e293b;
+    padding: 8px 16px;
+"""
+
+# Next steps panel styles
+NEXT_STEPS_CARD_STYLE = """
+    background-color: #16213e;
+    border: 1px solid #2d3748;
+    border-radius: 10px;
+    padding: 16px;
+"""
+
+NEXT_STEPS_CARD_HOVER = """
+    background-color: #16213e;
+    border: 1px solid #3b82f6;
+    border-radius: 10px;
+    padding: 16px;
+"""

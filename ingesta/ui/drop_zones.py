@@ -1,28 +1,110 @@
-"""Drop zone widgets for drag-and-drop file handling."""
+"""Enhanced drop zone widgets for drag-and-drop file handling.
+
+Features:
+- Accept multiple folders
+- Repeated additions without clearing
+- Duplicate prevention
+- Total size and clip count display
+- Truncated long filenames with tooltips
+"""
 
 from pathlib import Path
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Set
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QApplication, QMessageBox
+    QFileDialog, QApplication, QMessageBox, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, Signal, QMimeData, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+
+def format_size(size_bytes: int) -> str:
+    """Format bytes to human readable string."""
+    if size_bytes >= 1024**4:
+        return f"{size_bytes / (1024**4):.2f} TB"
+    elif size_bytes >= 1024**3:
+        return f"{size_bytes / (1024**3):.2f} GB"
+    elif size_bytes >= 1024**2:
+        return f"{size_bytes / (1024**2):.2f} MB"
+    elif size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes} B"
+
+
+def truncate_filename(filename: str, max_length: int = 35) -> str:
+    """Truncate filename with ellipsis if too long."""
+    if len(filename) <= max_length:
+        return filename
+    
+    # Keep extension and truncate middle
+    name, ext = Path(filename).stem, Path(filename).suffix
+    if len(ext) > 10:  # If extension is weirdly long, just truncate end
+        return filename[:max_length-3] + "..."
+    
+    available = max_length - len(ext) - 3  # 3 for "..."
+    if available < 5:
+        return filename[:max_length-3] + "..."
+    
+    return name[:available] + "..." + ext
+
+
+def count_media_files(path: Path) -> tuple:
+    """Count media files and total size in a path.
+    
+    Returns:
+        (file_count, total_size_bytes)
+    """
+    media_extensions = {
+        '.mov', '.mp4', '.m4v', '.mkv', '.avi', '.wmv', '.flv', '.webm',
+        '.r3d', '.braw', '.arri', '.dpx', '.exr', '.tiff', '.tif', '.tga',
+        '.mp3', '.wav', '.aif', '.aiff', '.m4a', '.aac', '.ogg', '.flac',
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.raw', '.cr2', '.nef', '.arw'
+    }
+    
+    file_count = 0
+    total_size = 0
+    
+    try:
+        if path.is_file():
+            if path.suffix.lower() in media_extensions or not media_extensions:
+                file_count = 1
+                total_size = path.stat().st_size
+        elif path.is_dir():
+            for f in path.rglob('*'):
+                if f.is_file():
+                    try:
+                        if f.suffix.lower() in media_extensions or not media_extensions:
+                            file_count += 1
+                            total_size += f.stat().st_size
+                        # Limit to prevent hanging on huge directories
+                        if file_count > 100000:
+                            break
+                    except (OSError, PermissionError):
+                        continue
+    except Exception:
+        pass
+    
+    return (file_count, total_size)
 
 
 class DropZone(QWidget):
     """A widget that accepts file/folder drops from Finder."""
     
     filesDropped = Signal(list)  # Emits list of Path objects
+    filesChanged = Signal()  # Emitted when files are added or removed
     
-    def __init__(self, title: str, subtitle: str, accept_multiple: bool = False, parent=None):
+    def __init__(self, title: str, subtitle: str, accept_multiple: bool = True, parent=None):
         super().__init__(parent)
         self.title = title
         self.subtitle = subtitle
         self.accept_multiple = accept_multiple
         self.dropped_paths: List[Path] = []
+        self._path_set: Set[str] = set()  # For duplicate prevention
         self.is_drag_active = False
         self.validation_callback: Optional[Callable[[Path], tuple]] = None
+        self._total_files = 0
+        self._total_size = 0
         
         self._setup_ui()
         self._update_appearance()
@@ -30,82 +112,129 @@ class DropZone(QWidget):
     def _setup_ui(self):
         """Setup the UI layout."""
         self.setAcceptDrops(True)
-        self.setMinimumHeight(120)
+        self.setMinimumHeight(200)
         self.setProperty("active", False)
         self.setProperty("valid", None)
         
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setSpacing(12)
         
-        # Icon label
+        # Header with icon and title
+        header = QHBoxLayout()
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
         self.icon_label = QLabel("📁")
-        self.icon_label.setStyleSheet("font-size: 32px;")
-        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.icon_label)
+        self.icon_label.setStyleSheet("font-size: 28px;")
+        header.addWidget(self.icon_label)
         
-        # Title
+        header_layout = QVBoxLayout()
+        header_layout.setSpacing(4)
+        
         self.title_label = QLabel(self.title)
         self.title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.title_label)
+        header_layout.addWidget(self.title_label)
         
-        # Subtitle
         self.subtitle_label = QLabel(self.subtitle)
         self.subtitle_label.setStyleSheet("font-size: 11px; color: #888;")
         self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.subtitle_label)
+        header_layout.addWidget(self.subtitle_label)
         
-        # Browse button
+        header.addLayout(header_layout)
+        layout.addLayout(header)
+        
+        # Stats row
+        self.stats_layout = QHBoxLayout()
+        self.stats_layout.setSpacing(16)
+        
+        self.files_count_label = QLabel("0 clips")
+        self.files_count_label.setStyleSheet("font-size: 12px; color: #aaa;")
+        self.stats_layout.addWidget(self.files_count_label)
+        
+        self.size_label = QLabel("0 GB")
+        self.size_label.setStyleSheet("font-size: 12px; color: #aaa;")
+        self.stats_layout.addWidget(self.size_label)
+        
+        self.stats_layout.addStretch()
+        layout.addLayout(self.stats_layout)
+        
+        # Scroll area for file list
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setMaximumHeight(150)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        
+        self.files_widget = QWidget()
+        self.files_layout = QVBoxLayout(self.files_widget)
+        self.files_layout.setSpacing(6)
+        self.files_layout.setContentsMargins(0, 0, 0, 0)
+        self.files_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        scroll.setWidget(self.files_widget)
+        layout.addWidget(scroll)
+        
+        # Buttons row
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        
         self.browse_btn = QPushButton("Browse...")
         self.browse_btn.setObjectName("secondary")
         self.browse_btn.setFixedWidth(100)
         self.browse_btn.clicked.connect(self._on_browse)
-        layout.addWidget(self.browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        button_layout.addWidget(self.browse_btn)
         
-        # Files display area
-        self.files_widget = QWidget()
-        self.files_layout = QVBoxLayout(self.files_widget)
-        self.files_layout.setSpacing(4)
-        self.files_layout.setContentsMargins(0, 8, 0, 0)
-        layout.addWidget(self.files_widget)
+        if self.accept_multiple:
+            self.clear_btn = QPushButton("Clear")
+            self.clear_btn.setObjectName("secondary")
+            self.clear_btn.setFixedWidth(80)
+            self.clear_btn.clicked.connect(self.clear)
+            button_layout.addWidget(self.clear_btn)
+        
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
         
         self.setLayout(layout)
     
     def _on_browse(self):
         """Open file dialog to select files/folders."""
         if self.accept_multiple:
-            # For multiple destinations, use directory selection multiple times
-            paths = []
-            while True:
-                path = QFileDialog.getExistingDirectory(
-                    self, f"Select Destination {len(paths) + 1}",
-                    options=QFileDialog.Option.ShowDirsOnly
-                )
-                if not path:
-                    break
-                paths.append(Path(path))
-                # Ask if they want to add more
-                reply = QMessageBox.question(
-                    self, "Add More?",
-                    f"Added {len(paths)} destination(s). Add another?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.No:
-                    break
-            if paths:
-                self.set_paths(paths)
-                self.filesDropped.emit(paths)
-        else:
-            # Single source - can be file or folder
             path = QFileDialog.getExistingDirectory(
-                self, "Select Source",
+                self, f"Select Folder",
                 options=QFileDialog.Option.ShowDirsOnly
             )
             if path:
-                p = Path(path)
-                self.set_paths([p])
-                self.filesDropped.emit([p])
+                self._add_paths([Path(path)])
+        else:
+            # Single source - can be file or folder
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Select Source")
+            msg.setText("What would you like to select?")
+            msg.setStandardButtons(
+                QMessageBox.StandardButton.Yes | 
+                QMessageBox.StandardButton.No | 
+                QMessageBox.StandardButton.Cancel
+            )
+            msg.button(QMessageBox.StandardButton.Yes).setText("Folder")
+            msg.button(QMessageBox.StandardButton.No).setText("File")
+            msg.button(QMessageBox.StandardButton.Cancel).setText("Cancel")
+            
+            reply = msg.exec()
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                path = QFileDialog.getExistingDirectory(self, "Select Source Folder")
+                if path:
+                    self._add_paths([Path(path)])
+            elif reply == QMessageBox.StandardButton.No:
+                path, _ = QFileDialog.getOpenFileName(self, "Select Source File")
+                if path:
+                    self._add_paths([Path(path)])
     
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter."""
@@ -122,7 +251,7 @@ class DropZone(QWidget):
         self._update_appearance()
     
     def dropEvent(self, event: QDropEvent):
-        """Handle drop."""
+        """Handle drop with support for multiple folders."""
         self.is_drag_active = False
         self.setProperty("active", False)
         
@@ -134,33 +263,168 @@ class DropZone(QWidget):
                     paths.append(Path(url.toLocalFile()))
             
             if paths:
-                if not self.accept_multiple:
-                    # Only take first for single selection
-                    paths = [paths[0]]
-                self.set_paths(paths)
-                self.filesDropped.emit(paths)
+                self._add_paths(paths)
             
             event.acceptProposedAction()
         self._update_appearance()
     
-    def set_paths(self, paths: List[Path]):
-        """Set the dropped paths and update display."""
-        self.dropped_paths = paths
-        self._update_files_display()
+    def _add_paths(self, paths: List[Path]):
+        """Add paths to the drop zone, preventing duplicates."""
+        added = []
+        duplicates = []
         
-        # Run validation if callback set
-        if self.validation_callback and paths:
-            validation_input: Path = paths[0] if len(paths) == 1 else paths[0]  # Use first path for validation
-            result = self.validation_callback(validation_input)
-            self.set_validation_state(result[0], result[1] if len(result) > 1 else "")
-        else:
-            self.set_validation_state(True, "")
+        for path in paths:
+            path_str = str(path.resolve())
+            if path_str in self._path_set:
+                duplicates.append(path.name)
+                continue
+            
+            self._path_set.add(path_str)
+            self.dropped_paths.append(path)
+            added.append(path)
+        
+        if added:
+            self._update_stats()
+            self._update_files_display()
+            self.filesDropped.emit(self.dropped_paths.copy())
+            self.filesChanged.emit()
+            
+            # Run validation on first path
+            if self.validation_callback and self.dropped_paths:
+                result = self.validation_callback(self.dropped_paths[0])
+                self.set_validation_state(result[0], result[1] if len(result) > 1 else "")
+        
+        # Show duplicate warning if any
+        if duplicates and len(duplicates) <= 3:
+            self.subtitle_label.setText(f"Skipped {len(duplicates)} duplicate(s)")
+            self.subtitle_label.setStyleSheet("font-size: 11px; color: #f59e0b;")
+    
+    def _update_stats(self):
+        """Update file count and size statistics."""
+        self._total_files = 0
+        self._total_size = 0
+        
+        for path in self.dropped_paths:
+            count, size = count_media_files(path)
+            self._total_files += count
+            self._total_size += size
+        
+        # Update labels
+        self.files_count_label.setText(f"{self._total_files} clips")
+        self.size_label.setText(format_size(self._total_size))
+    
+    def _update_files_display(self):
+        """Update the files display widget with truncated names and tooltips."""
+        # Clear existing
+        while self.files_layout.count():
+            item = self.files_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        
+        # Add path labels
+        for path in self.dropped_paths:
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            
+            # File icon
+            icon = QLabel("📄")
+            icon.setStyleSheet("font-size: 12px;")
+            row.addWidget(icon)
+            
+            # Filename (truncated with tooltip)
+            display_name = truncate_filename(path.name, max_length=40)
+            path_label = QLabel(display_name)
+            path_label.setObjectName("file-path")
+            path_label.setStyleSheet("""
+                font-size: 12px;
+                color: #ccc;
+                font-family: 'SF Mono', Monaco, monospace;
+            """)
+            path_label.setToolTip(str(path))
+            row.addWidget(path_label, stretch=1)
+            
+            # Individual file stats
+            count, size = count_media_files(path)
+            stats_label = QLabel(f"{count} clips, {format_size(size)}")
+            stats_label.setStyleSheet("font-size: 10px; color: #666;")
+            row.addWidget(stats_label)
+            
+            # Remove button (for multi-selection)
+            if self.accept_multiple and len(self.dropped_paths) > 0:
+                remove_btn = QPushButton("✕")
+                remove_btn.setFixedSize(18, 18)
+                remove_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: transparent;
+                        color: #666;
+                        border: none;
+                        border-radius: 9px;
+                        font-size: 10px;
+                        padding: 0;
+                    }
+                    QPushButton:hover {
+                        background-color: #374151;
+                        color: #f87171;
+                    }
+                """)
+                remove_btn.clicked.connect(lambda checked, p=path: self._remove_path(p))
+                row.addWidget(remove_btn)
+            
+            container = QWidget()
+            container.setLayout(row)
+            container.setStyleSheet("""
+                QWidget {
+                    background-color: #1e293b;
+                    border-radius: 6px;
+                    padding: 4px;
+                }
+            """)
+            self.files_layout.addWidget(container)
+        
+        self.files_layout.addStretch()
+    
+    def _remove_path(self, path: Path):
+        """Remove a specific path from the list."""
+        path_str = str(path.resolve())
+        if path_str in self._path_set:
+            self._path_set.discard(path_str)
+            self.dropped_paths = [p for p in self.dropped_paths if str(p.resolve()) != path_str]
+            self._update_stats()
+            self._update_files_display()
+            self.filesChanged.emit()
+    
+    def get_total_stats(self) -> tuple:
+        """Get total file count and size.
+        
+        Returns:
+            (file_count, size_bytes)
+        """
+        return (self._total_files, self._total_size)
+    
+    def set_paths(self, paths: List[Path]):
+        """Set the dropped paths (clears existing)."""
+        self.clear()
+        self._add_paths(paths)
     
     def clear(self):
         """Clear all paths."""
-        self.dropped_paths = []
-        self._update_files_display()
+        self.dropped_paths.clear()
+        self._path_set.clear()
+        self._total_files = 0
+        self._total_size = 0
+        self._update_stats()
+        
+        # Clear display
+        while self.files_layout.count():
+            item = self.files_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        
+        self.files_layout.addStretch()
         self.set_validation_state(None, "")
+        self.filesChanged.emit()
     
     def set_validation_callback(self, callback: Callable):
         """Set a callback for validation."""
@@ -170,7 +434,7 @@ class DropZone(QWidget):
         """Set validation state (True=valid, False=invalid, None=neutral)."""
         if valid is True:
             self.setProperty("valid", True)
-            self.subtitle_label.setText(message or "Valid")
+            self.subtitle_label.setText(message or f"{len(self.dropped_paths)} item(s) valid")
             self.subtitle_label.setStyleSheet("font-size: 11px; color: #4ade80;")
         elif valid is False:
             self.setProperty("valid", False)
@@ -181,24 +445,6 @@ class DropZone(QWidget):
             self.subtitle_label.setText(self.subtitle)
             self.subtitle_label.setStyleSheet("font-size: 11px; color: #888;")
         self._update_appearance()
-    
-    def _update_files_display(self):
-        """Update the files display widget."""
-        # Clear existing
-        while self.files_layout.count():
-            item = self.files_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        
-        # Add path labels
-        for path in self.dropped_paths:
-            path_label = QLabel(f"📄 {path.name}")
-            path_label.setObjectName("file-path")
-            path_label.setToolTip(str(path))
-            self.files_layout.addWidget(path_label)
-        
-        self.files_widget.setVisible(bool(self.dropped_paths))
     
     def _update_appearance(self):
         """Update visual appearance based on state."""
@@ -217,39 +463,6 @@ class SourceDropZone(DropZone):
             parent=parent
         )
         self.browse_btn.setToolTip("Select source folder or file (Ctrl+O)")
-    
-    def _on_browse(self):
-        """Override to allow file or folder selection."""
-        from PySide6.QtWidgets import QMessageBox
-        
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Select Source")
-        msg.setText("What would you like to select?")
-        msg.setStandardButtons(
-            QMessageBox.StandardButton.Yes | 
-            QMessageBox.StandardButton.No | 
-            QMessageBox.StandardButton.Cancel
-        )
-        msg.button(QMessageBox.StandardButton.Yes).setText("Folder")
-        msg.button(QMessageBox.StandardButton.No).setText("File")
-        msg.button(QMessageBox.StandardButton.Cancel).setText("Cancel")
-        
-        reply = msg.exec()
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            # Select folder
-            path = QFileDialog.getExistingDirectory(self, "Select Source Folder")
-            if path:
-                p = Path(path)
-                self.set_paths([p])
-                self.filesDropped.emit([p])
-        elif reply == QMessageBox.StandardButton.No:
-            # Select file
-            path, _ = QFileDialog.getOpenFileName(self, "Select Source File")
-            if path:
-                p = Path(path)
-                self.set_paths([p])
-                self.filesDropped.emit([p])
 
 
 class DestinationDropZone(DropZone):
@@ -262,5 +475,5 @@ class DestinationDropZone(DropZone):
             accept_multiple=True,
             parent=parent
         )
-        self.browse_btn.setText("Add Destinations...")
+        self.browse_btn.setText("Add Destination...")
         self.browse_btn.setToolTip("Select destination folders (Ctrl+D)")
