@@ -154,8 +154,10 @@ pip install -e .
 
 ### Prerequisites
 
-- Python 3.8+
+- **Python 3.8+** (Tested on Python 3.12.7)
 - FFmpeg installed on your system
+
+**Recommended:** Python 3.12.7 for best performance and compatibility
 
 ```bash
 # macOS
