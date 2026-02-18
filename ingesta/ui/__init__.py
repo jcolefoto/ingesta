@@ -1,6 +1,21 @@
-"""PySide6 Desktop UI for ingesta media ingestion tool."""
+"""PySide6 Desktop UI for ingesta media ingestion tool.
 
-from .app import main
-from .main_window import IngestaMainWindow
+Install with UI support: pip install ingesta[ui]
+"""
 
-__all__ = ['main', 'IngestaMainWindow']
+# Only import if PySide6 is available
+try:
+    from .app import main
+    from .main_window import IngestaMainWindow
+    __all__ = ['main', 'IngestaMainWindow']
+except ImportError:
+    # PySide6 not installed, UI unavailable
+    def main():
+        """Placeholder main function when PySide6 is not installed."""
+        import sys
+        print("Error: PySide6 is not installed.")
+        print("Install UI support with: pip install ingesta[ui]")
+        sys.exit(1)
+    
+    IngestaMainWindow = None
+    __all__ = ['main', 'IngestaMainWindow']
