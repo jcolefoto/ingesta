@@ -11,7 +11,7 @@ from typing import List, Optional
 import click
 from tqdm import tqdm
 
-from .ingestion import ingest_media, IngestionJob
+from .ingestion import ingest_media, IngestionJob, ProgressEvent, IngestionStage, IngestionCompletion
 from .sync import sync_audio_video
 from .premiere import create_premiere_project
 from .analysis import ContentAnalyzer
@@ -50,15 +50,14 @@ def setup_logging(verbose: bool, log_file: Optional[str] = None):
 
 @click.group()
 @click.version_option(version="0.1.0")
-@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def cli(ctx, verbose):
+def cli(ctx):
     """
     ingesta - Media Ingestion Tool
-    
+
     Combines Shotput Pro-style offloading with verification and
     Pluralize-style audio sync capabilities.
-    
+
     Commands:
         auto       Full automated workflow (detect, ingest, analyze, report, premiere)
         ingest     Copy and verify media files
@@ -68,8 +67,7 @@ def cli(ctx, verbose):
         report     Generate comprehensive PDF/CSV reports
     """
     ctx.ensure_object(dict)
-    ctx.obj['verbose'] = verbose
-    setup_logging(verbose)
+    ctx.obj['verbose'] = False
 
 
 @cli.command()
@@ -96,33 +94,72 @@ def cli(ctx, verbose):
 @click.option('--card-physical-label', help='Physical label on card (e.g., "VM_03", "RentalHouse_001")')
 @click.option('--card-type', type=click.Choice(['sd_card', 'micro_sd', 'cfexpress_a', 'cfexpress_b', 'ssd_sata', 'ssd_nvme', 'usb_drive'], case_sensitive=False), help='Type of storage media')
 @click.option('--notes', help='Notes about this offload')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
+@click.option('--no-progress', is_flag=True, help='Disable progress bars (auto-detected for non-TTY)')
 @click.pass_context
 def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, report,
-           project, shoot_day, card_label, card_physical_label, card_type, notes):
+           project, shoot_day, card_label, card_physical_label, card_type, notes, verbose, no_progress):
     """
     Copy media from source to destination(s) with verification.
     
     Can be associated with a project and shoot day for consolidated reporting.
-    
+
     Example:
         ingesta ingest -s /Volumes/CARD001 -d /Backup/Project001
         ingesta ingest -s ./video -d /Backup1 -d /Backup2 -c xxhash64
         ingesta ingest -s /card -d /backup -p PROJECT_ID --shoot-day DAY_ID --card-label A001
     """
-    setup_logging(ctx.obj['verbose'], log_file)
-    
+    setup_logging(verbose, log_file)
+
+    # Detect non-TTY
+    is_tty = sys.stdout.isatty()
+    disable_progress = no_progress or not is_tty
+
     click.echo(f"Starting ingestion from: {source}")
     click.echo(f"Destinations: {', '.join(dest)}")
     click.echo(f"Checksum algorithm: {checksum}")
-    
-    # Progress bar callback
-    pbar = tqdm(unit="files")
-    
-    def progress_callback(filename, total, current):
-        pbar.total = total
-        pbar.set_description(f"Copying {filename}")
-        pbar.update(1)
-    
+
+    # Progress tracking
+    pbar = None
+    current_file_name = ""
+
+    def progress_event_callback(event: ProgressEvent):
+        nonlocal pbar, current_file_name
+
+        if disable_progress:
+            # Non-TTY mode: only show stage changes
+            if event.stage == IngestionStage.COPYING and event.source_file:
+                if str(event.source_file) != current_file_name:
+                    current_file_name = str(event.source_file)
+                    click.echo(f"Copying: {event.source_file.name} ({event.current_file_index + 1}/{event.total_source_files})")
+            elif event.stage == IngestionStage.VERIFYING:
+                pass  # Skip verification messages to reduce noise
+            elif event.stage == IngestionStage.COMPLETE:
+                click.echo("Ingestion complete!")
+            return
+
+        # TTY mode: use tqdm progress bars
+        if event.stage == IngestionStage.SCANNING:
+            pass  # Will create pbar on first copy event
+        elif event.stage == IngestionStage.COPYING:
+            if pbar is None:
+                pbar = tqdm(
+                    total=event.total_source_files * event.total_destinations,
+                    unit="ops",
+                    desc="Ingesting"
+                )
+            pbar.set_description(f"Copying {event.source_file.name if event.source_file else '...'}")
+            # Update position based on current operation
+            current_op = (event.current_destination_index * event.total_source_files) + event.current_file_index
+            pbar.n = current_op
+            pbar.refresh()
+        elif event.stage == IngestionStage.VERIFYING:
+            if pbar:
+                pbar.set_description(f"Verifying {event.source_file.name if event.source_file else '...'}")
+        elif event.stage == IngestionStage.COMPLETE:
+            if pbar:
+                pbar.close()
+
     try:
         job = ingest_media(
             source=source,
@@ -132,17 +169,28 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
             include_patterns=list(include) if include else None,
             exclude_patterns=list(exclude) if exclude else None,
             log_file=log_file,
-            progress_callback=progress_callback
+            progress_event_callback=progress_event_callback,
+            no_progress=disable_progress
         )
-        
-        pbar.close()
-        
-        # Print summary
-        click.echo(f"\n✓ Ingestion complete!")
-        click.echo(f"  Files processed: {len(job.files_processed)}")
-        click.echo(f"  Successful: {job.success_count}")
-        click.echo(f"  Failed: {job.failure_count}")
-        click.echo(f"  Total size: {job.total_bytes / (1024**3):.2f} GB")
+
+        if pbar:
+            pbar.close()
+
+        # Get structured completion
+        completion = job.get_completion()
+
+        # Print summary with structured output
+        click.echo(f"\n{'=' * 50}")
+        click.echo("INGESTION SUMMARY")
+        click.echo(f"{'=' * 50}")
+        click.echo(f"Source files: {completion.source_file_count}")
+        click.echo(f"Destinations: {completion.destination_count}")
+        click.echo(f"Total operations: {completion.total_operations}")
+        click.echo(f"Successful operations: {completion.successful_operations}")
+        if completion.failed_operations > 0:
+            click.echo(click.style(f"Failed operations: {completion.failed_operations}", fg='red'))
+        click.echo(f"Total size: {completion.total_bytes / (1024**3):.2f} GB")
+        click.echo(f"Duration: {completion.duration_seconds:.1f}s")
         
         # Display copy speeds
         if job.avg_copy_speed_mbps:
@@ -150,16 +198,19 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
             click.echo(f"  Average: {job.avg_copy_speed_mbps:.1f} MB/s")
             if job.min_copy_speed_mbps and job.max_copy_speed_mbps:
                 click.echo(f"  Range: {job.min_copy_speed_mbps:.1f} - {job.max_copy_speed_mbps:.1f} MB/s")
-        
-        # Display SAFE TO FORMAT badge
-        safe_status = job.safe_to_format_status
+
+        # Display SAFE TO FORMAT badge using completion object
         click.echo(f"\n{'=' * 50}")
-        if safe_status['safe']:
-            click.echo(click.style(f"  {safe_status['badge']}", fg='green', bold=True))
+        if completion.safe_to_format:
+            click.echo(click.style("  ✓ SAFE TO FORMAT", fg='green', bold=True))
+            click.echo(f"  All {completion.successful_operations} operations successful")
         else:
-            click.echo(click.style(f"  {safe_status['badge']}", fg='red', bold=True))
-        click.echo(f"  {safe_status['reason']}")
-        click.echo(f"  Verified: {safe_status['verified_count']} | Failed: {safe_status['failed_count']}")
+            click.echo(click.style("  ✗ DO NOT FORMAT", fg='red', bold=True))
+            if completion.failed_operations > 0:
+                click.echo(f"  {completion.failed_operations} operation(s) failed")
+            else:
+                click.echo(f"  Not all files verified")
+        click.echo(f"  Successful: {completion.successful_operations} | Failed: {completion.failed_operations}")
         click.echo(f"{'=' * 50}")
         
         # Track card performance if label provided
@@ -240,11 +291,14 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
                 click.echo(f"  ⚠️  No shoot day specified for project tracking")
         
         if report:
-            job.save_report(report)
+            # Save structured completion report
+            completion = job.get_completion()
+            with open(report, 'w') as f:
+                f.write(completion.to_json())
             click.echo(f"  Report saved: {report}")
-        
+
         # Exit with error if any failures
-        if job.failure_count > 0:
+        if completion.failed_operations > 0:
             sys.exit(1)
             
     except Exception as e:
@@ -266,18 +320,19 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
 @click.option('--method', '-m', default='waveform',
               type=click.Choice(['waveform', 'timecode']),
               help='Sync method (default: waveform)')
+@click.option('--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def sync(ctx, video_dir, audio_dir, output_dir, tolerance, prefix, method):
+def sync(ctx, video_dir, audio_dir, output_dir, tolerance, prefix, method, verbose):
     """
     Sync external audio files to video clips.
     
     Uses waveform matching to automatically align audio tracks.
-    
+
     Example:
         ingesta sync -v ./video -a ./audio -o ./synced
         ingesta sync -v ./video -a ./audio -o ./synced -t 0.3
     """
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     click.echo(f"Syncing audio to video...")
     click.echo(f"  Video directory: {video_dir}")
@@ -327,18 +382,19 @@ def sync(ctx, video_dir, audio_dir, output_dir, tolerance, prefix, method):
               help='Resolution as WIDTHxHEIGHT (default: 1920x1080)')
 @click.option('--analyze/--no-analyze', default=True,
               help='Analyze and classify clips (default: True)')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def premiere(ctx, media_dir, output, name, fps, resolution, analyze):
+def premiere(ctx, media_dir, output, name, fps, resolution, analyze, verbose):
     """
     Create an Adobe Premiere Pro project file.
     
     Automatically organizes clips into bins based on content analysis.
-    
+
     Example:
         ingesta premiere -m ./media -o project.prproj
         ingesta premiere -m ./media -o project.prproj --fps 30 --resolution 3840x2160
     """
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     click.echo(f"Creating Premiere project...")
     click.echo(f"  Media directory: {media_dir}")
@@ -380,19 +436,20 @@ def premiere(ctx, media_dir, output, name, fps, resolution, analyze):
               help='Save analysis report to JSON file')
 @click.option('--syncable-only', is_flag=True,
               help='Only show syncable clips')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def analyze(ctx, media_dir, output, syncable_only):
+def analyze(ctx, media_dir, output, syncable_only, verbose):
     """
     Analyze video clips and classify them by content type.
     
     Identifies B-roll, establishing shots, interviews, and syncable clips.
-    
+
     Example:
         ingesta analyze -m ./video
         ingesta analyze -m ./video -o report.json
         ingesta analyze -m ./video --syncable-only
     """
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     click.echo(f"Analyzing clips in: {media_dir}")
     
@@ -484,11 +541,12 @@ def analyze(ctx, media_dir, output, syncable_only):
               type=click.Choice(['fast', 'standard', 'deep'], case_sensitive=False),
               default='standard',
               help='Analysis performance profile: fast (quick), standard (balanced), deep (comprehensive)')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
 def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path,
            group_by_folder, transcribe, analyze_frames, analyze_audio_tech, extract_metadata,
            detect_duplicates, check_quality, generate_proxies, extract_keywords,
-           whisper_model, proxy_resolution, project, analysis_profile):
+           whisper_model, proxy_resolution, project, analysis_profile, verbose):
     """
     Generate comprehensive reports from analyzed media.
 
@@ -506,7 +564,7 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
         ingesta report -m ./ingested -g -o ./reports  # ShotPut-style bins
         ingesta report -m ./media --transcribe --analyze-frames  # Full analysis
     """
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     # Handle project-based reporting
     if project:
@@ -889,8 +947,9 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
               help='Resolution as WIDTHxHEIGHT (default: 1920x1080)')
 @click.option('--template', '-t',
               help='Project template for bin organization')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def export(ctx, media_dir, output_dir, name, export_formats, fps, resolution, template):
+def export(ctx, media_dir, output_dir, name, export_formats, fps, resolution, template, verbose):
     """
     Export NLE projects (Premiere/Resolve/FCP/EDL) with bins and markers.
 
@@ -905,7 +964,7 @@ def export(ctx, media_dir, output_dir, name, export_formats, fps, resolution, te
         ingesta export -m ./media -o ./exports -n "Project_001" -f premiere -f edl
         ingesta export -m ./media -o ./exports -n "Project" --template documentary
     """
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     from .analysis import ContentAnalyzer
     from pathlib import Path
@@ -1004,8 +1063,9 @@ def export(ctx, media_dir, output_dir, name, export_formats, fps, resolution, te
               help='Skip report generation')
 @click.option('--no-premiere', is_flag=True,
               help='Skip Premiere project creation')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thumbnails, no_reports, no_premiere):
+def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thumbnails, no_reports, no_premiere, verbose):
     """
     Automated workflow: detect cards, ingest, analyze, and create Premiere project.
 
@@ -1024,7 +1084,7 @@ def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thu
         ingesta auto --project "Client_001"    # Custom project name
         ingesta auto --template corporate      # Use project template
     """
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
 
     # Override template settings with CLI options
     template_settings = {}
@@ -1046,7 +1106,7 @@ def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thu
             project_name=project,
             template=template,
             output_dir=Path(dest) if dest else None,
-            verbose=ctx.obj['verbose']
+            verbose=verbose
         )
 
         # Apply CLI overrides
@@ -1096,12 +1156,13 @@ def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thu
 
 
 @cli.command()
-@click.option('--step', '-s', 
+@click.option('--step', '-s',
               type=click.Choice(['project', 'offload', 'report', 'deliverables', 'all']),
               default='all',
               help='Workflow step to run (default: all)')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def tui(ctx, step):
+def tui(ctx, step, verbose):
     """
     Interactive TUI workflow: Project → Offload → Report → Deliverables.
     
@@ -1117,11 +1178,11 @@ def tui(ctx, step):
         ingesta tui --step offload     # Just offload media
         ingesta tui --step report      # Just generate reports
     """
-    setup_logging(ctx.obj['verbose'])
-    
+    setup_logging(verbose)
+
     from .tui import TUIWorkflow
-    
-    workflow = TUIWorkflow(verbose=ctx.obj['verbose'])
+
+    workflow = TUIWorkflow(verbose=verbose)
     success = False
     
     if step == 'all':
@@ -1159,10 +1220,11 @@ def project():
 @click.option('--dp', help='Director of Photography')
 @click.option('--description', help='Project description')
 @click.option('--base-dir', '-b', help='Base directory for project files')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def project_new(ctx, name, client, director, producer, dp, description, base_dir):
+def project_new(ctx, name, client, director, producer, dp, description, base_dir, verbose):
     """Create a new project."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     pm = get_project_manager()
     
@@ -1187,10 +1249,11 @@ def project_new(ctx, name, client, director, producer, dp, description, base_dir
 @project.command('list')
 @click.option('--status', type=click.Choice(['active', 'completed', 'archived', 'all']),
               default='all', help='Filter by status')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def project_list(ctx, status):
+def project_list(ctx, status, verbose):
     """List all projects."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     pm = get_project_manager()
     
@@ -1211,10 +1274,11 @@ def project_list(ctx, status):
 
 @project.command('show')
 @click.argument('project_id')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def project_show(ctx, project_id):
+def project_show(ctx, project_id, verbose):
     """Show project details."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     pm = get_project_manager()
     project = pm.get_project(project_id)
@@ -1257,10 +1321,11 @@ def project_show(ctx, project_id):
 @click.option('--date', help='Date (YYYY-MM-DD), defaults to today')
 @click.option('--location', help='Shoot location')
 @click.option('--description', help='Description')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def project_add_shoot_day(ctx, project_id, label, date, location, description):
+def project_add_shoot_day(ctx, project_id, label, date, location, description, verbose):
     """Add a shoot day to a project."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     pm = get_project_manager()
     
@@ -1290,10 +1355,11 @@ def project_add_shoot_day(ctx, project_id, label, date, location, description):
               help='Report format (default: both)')
 @click.option('--include-all-offloads', is_flag=True,
               help='Include analysis of all media from all offloads')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def project_report(ctx, project_id, output_dir, report_format, include_all_offloads):
+def project_report(ctx, project_id, output_dir, report_format, include_all_offloads, verbose):
     """Generate consolidated report for entire project."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     pm = get_project_manager()
     project = pm.get_project(project_id)
@@ -1333,10 +1399,11 @@ def template():
 
 
 @template.command('list')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def template_list(ctx):
+def template_list(ctx, verbose):
     """List all available project templates."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     tm = get_template_manager()
     templates = tm.list_templates()
@@ -1353,10 +1420,11 @@ def template_list(ctx):
 
 @template.command('show')
 @click.argument('template_name')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def template_show(ctx, template_name):
+def template_show(ctx, template_name, verbose):
     """Show template details including bins and tags."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     tm = get_template_manager()
     tmpl = tm.get_template_by_name(template_name)
@@ -1394,10 +1462,11 @@ def template_show(ctx, template_name):
 @template.command('export')
 @click.argument('template_name')
 @click.option('--output', '-o', type=click.Path(), help='Output JSON file path')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def template_export(ctx, template_name, output):
+def template_export(ctx, template_name, output, verbose):
     """Export a template to JSON file."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     tm = get_template_manager()
     tmpl = tm.get_template_by_name(template_name)
@@ -1428,10 +1497,11 @@ def audit():
 @audit.command('show')
 @click.option('--project', '-p', help='Project ID for project-specific audit')
 @click.option('--output', '-o', type=click.Path(), help='Output report file path')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def audit_show(ctx, project, output):
+def audit_show(ctx, project, output, verbose):
     """Show audit log for project or global."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     logger = get_audit_logger(project)
     
@@ -1467,10 +1537,11 @@ def audit_show(ctx, project, output):
 @audit.command('export')
 @click.option('--project', '-p', help='Project ID')
 @click.option('--output', '-o', required=True, type=click.Path(), help='Output JSON file')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def audit_export(ctx, project, output):
+def audit_export(ctx, project, output, verbose):
     """Export audit log as JSON."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     logger = get_audit_logger(project)
     output_path = logger.export_json(Path(output))
@@ -1481,10 +1552,11 @@ def audit_export(ctx, project, output):
 
 @audit.command('verify')
 @click.option('--project', '-p', help='Project ID to verify')
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
 @click.pass_context
-def audit_verify(ctx, project):
+def audit_verify(ctx, project, verbose):
     """Verify audit chain integrity."""
-    setup_logging(ctx.obj['verbose'])
+    setup_logging(verbose)
     
     logger = get_audit_logger(project)
     

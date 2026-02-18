@@ -52,6 +52,7 @@ dev = [
 
 [project.scripts]
 ingesta = "ingesta.cli:cli"
+ingest = "ingesta.cli:cli"
 
 [project.urls]
 Homepage = "https://github.com/jcolefoto/ingesta"

@@ -33,6 +33,7 @@ setup(
     entry_points={
         "console_scripts": [
             "ingesta=ingesta.cli:main",
+            "ingest=ingesta.cli:main",
         ],
     },
     include_package_data=True,
