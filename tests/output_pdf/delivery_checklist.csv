@@ -1,0 +1,5 @@
+Severity,Category,Clip Name,Message,Details,Recommendation
+warning,slate,test_clip.mp4,No slate detected,This clip appears to be syncable but no slate was detected,Check if slate exists or manually mark scene/take info
+info,metadata,test_clip.mp4,No timecode detected,Timecode information not available,
+info,metadata,test_clip.mp4,No reel ID detected,Reel/camera identifier not found,
+info,metadata,test_clip.mp4,No scene number detected,Syncable clip may need scene identification,
