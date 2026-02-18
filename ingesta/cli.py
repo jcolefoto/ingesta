@@ -423,11 +423,15 @@ def analyze(ctx, media_dir, output, syncable_only):
 @click.option('--proxy-resolution', default='960x540',
               help='Proxy resolution (default: 960x540)')
 @click.option('--project', '-p', help='Generate consolidated report for project ID (aggregates all offloads)')
+@click.option('--profile', '-pr', 'analysis_profile',
+              type=click.Choice(['fast', 'standard', 'deep'], case_sensitive=False),
+              default='standard',
+              help='Analysis performance profile: fast (quick), standard (balanced), deep (comprehensive)')
 @click.pass_context
 def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path,
            group_by_folder, transcribe, analyze_frames, analyze_audio_tech, extract_metadata,
            detect_duplicates, check_quality, generate_proxies, extract_keywords,
-           whisper_model, proxy_resolution, project):
+           whisper_model, proxy_resolution, project, analysis_profile):
     """
     Generate comprehensive reports from analyzed media.
 
@@ -498,6 +502,33 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
     click.echo(f"  Check quality: {'Yes' if check_quality else 'No'}")
     click.echo(f"  Generate proxies: {'Yes' if generate_proxies else 'No'}")
     click.echo(f"  Extract keywords: {'Yes' if extract_keywords else 'No'}")
+    
+    # Apply performance profile settings if not standard
+    if analysis_profile != 'standard':
+        from .reports.performance_profile import ProfileManager, AnalysisProfile
+        profile = ProfileManager.from_string(analysis_profile)
+        profile_config = ProfileManager.get_profile(profile)
+        
+        click.echo(f"\n📊 Using {profile_config.name} profile:")
+        click.echo(f"  {profile_config.description}")
+        click.echo(f"  Estimated: {profile_config.estimated_time}")
+        
+        # Override settings with profile defaults
+        transcribe = profile_config.transcribe
+        analyze_frames = profile_config.analyze_frames
+        analyze_audio_tech = profile_config.analyze_audio_tech
+        extract_metadata = profile_config.extract_metadata
+        detect_duplicates = profile_config.detect_duplicates
+        check_quality = profile_config.check_quality
+        generate_proxies = profile_config.generate_proxies
+        extract_keywords = profile_config.extract_keywords
+        thumbnails = profile_config.include_thumbnails
+        
+        click.echo(f"\n  Profile settings applied:")
+        click.echo(f"    Transcribe: {'Yes' if transcribe else 'No'}")
+        click.echo(f"    Analyze frames: {'Yes' if analyze_frames else 'No'}")
+        click.echo(f"    Detect duplicates: {'Yes' if detect_duplicates else 'No'}")
+        click.echo(f"    Check quality: {'Yes' if check_quality else 'No'}")
     
     try:
         # Step 1: Analyze media

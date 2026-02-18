@@ -43,6 +43,10 @@ from .multicam_detector import (
 from .editor_handoff import (
     EditorHandoffGenerator, EditorHandoffPackage, generate_editor_handoff
 )
+from .performance_profile import (
+    AnalysisProfile, ProfileConfig, ProfileManager,
+    get_analysis_settings, format_profile_summary
+)
 
 __all__ = [
     'XMLParser',
@@ -95,4 +99,9 @@ __all__ = [
     'EditorHandoffGenerator',
     'EditorHandoffPackage',
     'generate_editor_handoff',
+    'AnalysisProfile',
+    'ProfileConfig',
+    'ProfileManager',
+    'get_analysis_settings',
+    'format_profile_summary',
 ]
