@@ -71,9 +71,9 @@ class ThumbnailExtractor:
         """
         Calculate timestamps for thumbnail extraction.
         
-        Pattern: First frame, last frame, and equally spaced frames in between.
-        Example with count=6:
-            - thumb_01: 0% (first frame)
+        Pattern: First frame, last frame, and (count-2) equally spaced in between.
+        For 6 thumbnails:
+            - thumb_01: 0%  (first frame)
             - thumb_02: 20%
             - thumb_03: 40%
             - thumb_04: 60%
@@ -96,13 +96,20 @@ class ThumbnailExtractor:
         if count == 1:
             return [duration / 2]
         
-        # Pattern: First, Last, and (count-2) equally spaced in between
-        timestamps = []
-        for i in range(count):
-            # Calculate position as percentage: 0%, 100%, and equally spaced in between
+        if count == 2:
+            return [0.0, duration]
+        
+        # Pattern: First (0%), Last (100%), and (count-2) equally spaced in between
+        timestamps = [0.0]  # First frame
+        
+        # Calculate positions for middle frames (excluding first and last)
+        # For count=6: we need positions at 20%, 40%, 60%, 80%
+        # That's 4 positions = count - 2
+        for i in range(1, count - 1):
             position = i / (count - 1)
-            timestamp = position * duration
-            timestamps.append(timestamp)
+            timestamps.append(position * duration)
+        
+        timestamps.append(duration)  # Last frame
         
         return timestamps
     
