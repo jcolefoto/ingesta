@@ -23,6 +23,7 @@ from .reports import (
 )
 from .project_manager import ProjectManager, get_project_manager
 from .auto import AutoWorkflow
+from .tui import run_tui_workflow, WorkflowStep
 
 
 # Setup logging
@@ -861,6 +862,55 @@ def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thu
     except Exception as e:
         click.echo(f"")
         click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('--step', '-s', 
+              type=click.Choice(['project', 'offload', 'report', 'deliverables', 'all']),
+              default='all',
+              help='Workflow step to run (default: all)')
+@click.pass_context
+def tui(ctx, step):
+    """
+    Interactive TUI workflow: Project → Offload → Report → Deliverables.
+    
+    Step-by-step guided workflow for media ingestion:
+    1. Create or select a project
+    2. Offload media from cards/devices with verification
+    3. Generate comprehensive reports (PDF/CSV)
+    4. Package client-ready deliverables
+    
+    Examples:
+        ingesta tui                    # Run complete workflow
+        ingesta tui --step project     # Just create/select project
+        ingesta tui --step offload     # Just offload media
+        ingesta tui --step report      # Just generate reports
+    """
+    setup_logging(ctx.obj['verbose'])
+    
+    from .tui import TUIWorkflow
+    
+    workflow = TUIWorkflow(verbose=ctx.obj['verbose'])
+    success = False
+    
+    if step == 'all':
+        success = workflow.run_full_workflow()
+    elif step == 'project':
+        success = workflow.run_project_step()
+    elif step == 'offload':
+        # Need to ensure project step was done
+        if WorkflowStep.PROJECT not in workflow.state.completed_steps:
+            click.echo("Creating/selecting project first...")
+            if not workflow.run_project_step():
+                sys.exit(1)
+        success = workflow.run_offload_step()
+    elif step == 'report':
+        success = workflow.run_report_step()
+    elif step == 'deliverables':
+        success = workflow.run_deliverables_step()
+    
+    if not success:
         sys.exit(1)
 
 
