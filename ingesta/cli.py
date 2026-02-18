@@ -16,6 +16,7 @@ from .sync import sync_audio_video
 from .premiere import create_premiere_project
 from .analysis import ContentAnalyzer
 from .checksum import get_supported_algorithms
+from .reports import ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator
 
 
 # Setup logging
@@ -50,6 +51,7 @@ def cli(ctx, verbose):
         sync       Sync external audio to video
         premiere   Create Adobe Premiere Pro project
         analyze    Analyze clips for content type
+        report     Generate comprehensive PDF/CSV reports
     """
     ctx.ensure_object(dict)
     ctx.obj['verbose'] = verbose
@@ -313,6 +315,123 @@ def analyze(ctx, media_dir, output, syncable_only):
             with open(output, 'w') as f:
                 json.dump(report, f, indent=2)
             click.echo(f"\nReport saved: {output}")
+        
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('--media-dir', '-m', required=True, type=click.Path(exists=True),
+              help='Directory containing media files')
+@click.option('--output-dir', '-o', type=click.Path(),
+              help='Output directory for reports (default: ./reports)')
+@click.option('--format', '-f', 'report_format', default='both',
+              type=click.Choice(['pdf', 'csv', 'both']),
+              help='Report format (default: both)')
+@click.option('--thumbnails/--no-thumbnails', default=True,
+              help='Generate thumbnails (default: True)')
+@click.option('--project-name', '-n',
+              help='Project name for report')
+@click.option('--source-path', '-s',
+              help='Source media path for report metadata')
+@click.option('--dest-path', '-d', multiple=True,
+              help='Destination/archive path (can be used multiple times)')
+@click.pass_context
+def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path):
+    """
+    Generate comprehensive reports from analyzed media.
+    
+    Creates PDF and/or CSV reports with clip details, thumbnails,
+    metadata, and summary statistics. Can be run standalone or
+    after the analyze command.
+    
+    Example:
+        ingesta report -m ./ingested -o ./reports
+        ingesta report -m ./media --format pdf --no-thumbnails
+        ingesta report -m ./media -n "Project Alpha" -s /card -d /backup1 -d /backup2
+    """
+    setup_logging(ctx.obj['verbose'])
+    
+    media_path = Path(media_dir)
+    output_path = Path(output_dir) if output_dir else Path("./reports")
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    click.echo(f"Generating reports...")
+    click.echo(f"  Media directory: {media_path}")
+    click.echo(f"  Output directory: {output_path}")
+    click.echo(f"  Format: {report_format}")
+    click.echo(f"  Thumbnails: {'Yes' if thumbnails else 'No'}")
+    
+    try:
+        # Step 1: Analyze media
+        click.echo("\nAnalyzing clips...")
+        analyzer = ContentAnalyzer()
+        analyses = analyzer.analyze_directory(media_path)
+        
+        if not analyses:
+            click.echo("No video files found in media directory.", err=True)
+            sys.exit(1)
+        
+        click.echo(f"  Found {len(analyses)} clips")
+        
+        # Step 2: Extract thumbnails if requested
+        thumbnail_map = {}
+        if thumbnails:
+            click.echo("\nExtracting thumbnails...")
+            thumb_dir = output_path / "thumbnails"
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            
+            with ThumbnailExtractor(output_dir=thumb_dir) as extractor:
+                for i, analysis in enumerate(analyses, 1):
+                    click.echo(f"  [{i}/{len(analyses)}] {analysis.file_path.name}")
+                    thumbs = extractor.extract_thumbnails_for_clip(analysis.file_path)
+                    thumbnail_map[analysis.file_path] = thumbs
+        
+        # Step 3: Generate reports
+        generated_files = []
+        
+        # Determine project name
+        proj_name = project_name or media_path.name or "Media Ingest Report"
+        dest_list = list(dest_path) if dest_path else []
+        
+        if report_format in ['pdf', 'both']:
+            click.echo("\nGenerating PDF report...")
+            pdf_generator = PDFReportGenerator(
+                output_path=output_path / "report.pdf",
+                project_name=proj_name,
+                source_path=source_path or str(media_path),
+                destination_paths=dest_list
+            )
+            pdf_path = pdf_generator.generate_report(analyses, thumbnail_map)
+            generated_files.append(pdf_path)
+            click.echo(f"  ✓ PDF: {pdf_path}")
+        
+        if report_format in ['csv', 'both']:
+            click.echo("\nGenerating CSV reports...")
+            csv_generator = CSVReportGenerator(output_path=output_path / "report.csv")
+            csv_path = csv_generator.generate_report(analyses)
+            generated_files.append(csv_path)
+            click.echo(f"  ✓ CSV: {csv_path}")
+            
+            # Also generate summary CSV
+            summary_path = csv_generator.generate_summary_csv(analyses)
+            generated_files.append(summary_path)
+            click.echo(f"  ✓ Summary CSV: {summary_path}")
+        
+        # Summary
+        click.echo(f"\n✓ Reports generated successfully!")
+        click.echo(f"  Total clips: {len(analyses)}")
+        
+        total_duration = sum(a.duration for a in analyses)
+        click.echo(f"  Total duration: {total_duration:.1f}s")
+        
+        syncable_count = sum(1 for a in analyses if a.is_syncable)
+        click.echo(f"  Syncable clips: {syncable_count}")
+        
+        click.echo(f"\nOutput files:")
+        for f in generated_files:
+            click.echo(f"  - {f}")
         
     except Exception as e:
         click.echo(f"Error: {e}", err=True)

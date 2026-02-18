@@ -19,6 +19,14 @@ A Python-based media ingestion tool that combines Shotput Pro-style offloading w
   - Audio: WAV, MP3, BWF
   - Video: MP4, MOV, MXF
 
+### 3. Comprehensive Reporting
+- Generate professional PDF reports with thumbnails and metadata
+- Export CSV files for spreadsheet analysis
+- Extract evenly-distributed thumbnails from each clip
+- Parse camera XML sidecar files (Sony, Canon, Blackmagic)
+- Content classification (B-roll, interview, establishing shots, etc.)
+- Summary statistics and breakdown by clip type
+
 ## Installation
 
 ```bash
@@ -148,6 +156,38 @@ ingesta premiere \
   --output ./project.prproj
 ```
 
+### Generate Reports
+
+Generate comprehensive PDF and CSV reports with thumbnails and metadata:
+
+```bash
+# Generate both PDF and CSV reports
+ingesta report -m ./ingested -o ./reports
+
+# PDF only
+ingesta report -m ./media --format pdf -o ./reports
+
+# CSV only, no thumbnails
+ingesta report -m ./media --format csv --no-thumbnails
+
+# With project metadata
+ingesta report \
+  -m ./ingested \
+  -o ./reports \
+  -n "Documentary Project" \
+  -s /Volumes/CARD001 \
+  -d /Backup/Project001 \
+  -d /Archive/Project001
+```
+
+The report command:
+- Analyzes all clips in the media directory
+- Extracts 5-6 thumbnails evenly distributed throughout each clip
+- Parses XML sidecar files from professional cameras (Sony, Canon, Blackmagic)
+- Generates a professional PDF report with cover page, statistics, and clip details
+- Generates CSV files for spreadsheet analysis
+- Creates a summary CSV with aggregate statistics
+
 ## CLI Reference
 
 ### Global Options
@@ -201,6 +241,22 @@ Options:
   --create-bins       Automatically create bins for organization
 ```
 
+### Report Command
+
+```
+ingesta report [OPTIONS]
+
+Options:
+  --media-dir PATH    Directory containing media files (required)
+  --output-dir PATH   Output directory for reports (default: ./reports)
+  --format TEXT       Report format: pdf, csv, both (default: both)
+  --thumbnails        Generate thumbnails (default: enabled)
+  --no-thumbnails     Skip thumbnail generation
+  --project-name TEXT Project name for report
+  --source-path TEXT  Source media path for report metadata
+  --dest-path PATH    Destination/archive path (can use multiple times)
+```
+
 ## Project Structure
 
 ```
@@ -211,7 +267,14 @@ ingesta/
 │   ├── ingestion.py     # File copying & verification
 │   ├── sync.py          # Waveform matching & audio sync
 │   ├── premiere.py      # Premiere project generation
-│   └── cli.py           # Command-line interface
+│   ├── analysis.py      # Content analysis & classification
+│   ├── cli.py           # Command-line interface
+│   └── reports/         # Report generation
+│       ├── __init__.py
+│       ├── xml_parser.py    # Camera XML sidecar parser
+│       ├── thumbnails.py    # Thumbnail extraction
+│       ├── csv_report.py    # CSV report generator
+│       └── pdf_report.py    # PDF report generator
 ├── tests/
 │   └── test_*.py
 ├── README.md

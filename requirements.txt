@@ -13,6 +13,10 @@ scipy>=1.10.0
 # XML processing
 lxml>=4.9.0
 
+# Report generation
+reportlab>=4.0.0
+Pillow>=10.0.0
+
 # File handling
 pathlib>=1.0.0
 
