@@ -26,6 +26,7 @@ from .auto import AutoWorkflow
 from .tui import run_tui_workflow, WorkflowStep
 from .templates import get_template_manager, TemplateType
 from .exports import export_nle_project, ExportManager, ExportFormat
+from .deliverables import create_client_deliverable, DeliverableConfig
 
 
 # Setup logging
