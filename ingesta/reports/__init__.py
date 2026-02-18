@@ -40,6 +40,9 @@ from .multicam_detector import (
     MulticamDetector, MulticamGroup, UnsyncedClipAnalysis, SyncAnalysisResult,
     UnsyncedCategory, MulticamReason, detect_multicam_sequences, analyze_sync_failure
 )
+from .editor_handoff import (
+    EditorHandoffGenerator, EditorHandoffPackage, generate_editor_handoff
+)
 
 __all__ = [
     'XMLParser',
@@ -89,4 +92,7 @@ __all__ = [
     'MulticamReason',
     'detect_multicam_sequences',
     'analyze_sync_failure',
+    'EditorHandoffGenerator',
+    'EditorHandoffPackage',
+    'generate_editor_handoff',
 ]
