@@ -28,7 +28,8 @@ A professional-grade media ingestion tool with verified media offloading, audio 
 
 ## Capabilities at a Glance
 
-- **TUI Workflow** – Interactive step-by-step interface for project creation, media offload, reporting, and deliverable packaging
+- **Desktop UI** – Modern PySide6 interface with drag-and-drop, feature cards, and real-time pipeline visualization
+- **TUI Workflow** – Interactive step-by-step terminal interface for project creation, media offload, reporting, and deliverable packaging
 - **Project Templates** – Pre-configured workflows for documentary, commercial, wedding, corporate, and music video productions
 - **NLE Exports** – Native project files for Premiere Pro, DaVinci Resolve, Final Cut Pro, and universal EDL format
 - **Client Deliverables** – Automated packaging of reports, proxies, transcripts, thumbnails, and metadata into professional ZIP archives
@@ -160,6 +161,37 @@ context.set("destinations", ["/backup"])
 result = engine.run(context)
 ```
 
+### 11. Desktop UI (PySide6)
+- **Three-panel interface**: Pipeline steps, active modules, workflow status
+- **Drag-and-drop support**: Drop cards/drives from Finder/File Explorer
+- **Feature Cards**: Individual cards for Copy, Verify, Reports, Sync, Frame Analysis, Transcription
+  - Enable/disable toggle per feature
+  - Status pills: Idle, Queued, Running, Complete, Error
+  - Progress bars with item counts and current file
+  - Cancel button per running step
+- **Enhanced Workflow Steps**: Visual pipeline with real-time updates
+  - Overall progress bar
+  - Per-step progress with current item
+  - Elapsed time tracking
+  - States: Pending, Queued, Running, Complete, Error, Skipped, Cancelled
+- **Reports Panel**: Visual report configuration and generation
+  - Browse for output directory
+  - Report name preview
+  - Auto-generate toggle
+  - Generate now with progress
+  - Open folder/file after completion
+  - Artifact list with file sizes
+- **Source Queue**: Editable media file list
+  - Media type badges (Video 🎬, Audio 🎵, Image 🖼)
+  - File size display
+  - Multi-select remove
+  - Clear all / Undo last removal (Ctrl+Z)
+  - Keyboard shortcuts (Ctrl+A select all, Delete remove selected)
+- **Event Bus Integration**: Unified UI updates
+  - Workers emit standard events (step_started, step_progress, step_completed, step_error)
+  - UI components subscribe to events
+  - Progress updates every 250-500ms for responsiveness
+
 ## Installation
 
 ```bash
@@ -215,7 +247,7 @@ ingesta ingest --source /path/to/memory/card --dest /path/to/backup
 
 ### Option 2: Desktop UI (PySide6)
 
-For a visual, drag-and-drop interface with guided workflows:
+For a visual, drag-and-drop interface with guided workflows and real-time monitoring:
 
 ```bash
 # 1. Clone and install with UI extras
@@ -234,6 +266,34 @@ Or use the convenience script:
 chmod +x scripts/run_ui.sh
 ./scripts/run_ui.sh
 ```
+
+**Desktop UI Features:**
+- **Three-Panel Layout**: Pipeline steps (left), active modules (center), workflow status (right)
+- **Drag-and-Drop**: Drop cards/drives directly from Finder/File Explorer
+- **Feature Cards**: Actionable cards for Copy, Verify, Reports, Sync, Frame Analysis, Transcription
+  - Run/Enable toggle for each feature
+  - Live status pills (Idle/Queued/Running/Complete/Error)
+  - Progress indicators with item counts
+  - Cancel per step
+- **Enhanced Workflow Steps**: Real-time pipeline visualization
+  - Percent/item count progress
+  - Current file display
+  - Elapsed time tracking
+  - Statuses: Pending, Queued, Running, Complete, Error, Skipped
+- **Reports Panel**: Visual report configuration
+  - Output location chooser
+  - Report name preview
+  - Auto-generate toggle
+  - One-click generation with progress
+  - Post-completion: Open folder/file and artifact list
+- **Source Queue**: Editable media queue
+  - Media type badges (Video, Audio, Image)
+  - File size display
+  - Multi-select with remove
+  - Undo last removal (Ctrl+Z)
+- **Unified Event Bus**: All UI updates synchronized via events
+  - Progress updates every 250-500ms
+  - Real-time status synchronization across panels
 
 ### ⚠️ Important: Git Version Warning
 
