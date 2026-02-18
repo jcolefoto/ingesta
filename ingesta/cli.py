@@ -25,9 +25,11 @@ from .project_manager import ProjectManager, get_project_manager
 from .auto import AutoWorkflow
 from .tui import run_tui_workflow, WorkflowStep
 from .templates import get_template_manager, TemplateType
+from .exports import export_nle_project, ExportManager, ExportFormat
 
 
 # Setup logging
+logger = logging.getLogger(__name__)
 def setup_logging(verbose: bool, log_file: Optional[str] = None):
     """Setup logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -751,6 +753,116 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
         
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('--media-dir', '-m', required=True, type=click.Path(exists=True),
+              help='Directory containing media files')
+@click.option('--output-dir', '-o', required=True, type=click.Path(),
+              help='Output directory for exports')
+@click.option('--name', '-n', required=True, help='Project name')
+@click.option('--format', '-f', 'export_formats', multiple=True,
+              type=click.Choice(['premiere', 'resolve', 'fcpxml', 'edl', 'all']),
+              default=['all'],
+              help='Export format(s) - can specify multiple')
+@click.option('--fps', default=24.0, type=float,
+              help='Frame rate (default: 24)')
+@click.option('--resolution', '-r', default='1920x1080',
+              help='Resolution as WIDTHxHEIGHT (default: 1920x1080)')
+@click.option('--template', '-t',
+              help='Project template for bin organization')
+@click.pass_context
+def export(ctx, media_dir, output_dir, name, export_formats, fps, resolution, template):
+    """
+    Export NLE projects (Premiere/Resolve/FCP/EDL) with bins and markers.
+
+    Creates professional project files with:
+    - Bin organization by content type
+    - Markers for slates, scenes, takes
+    - Timecode preservation
+    - Multi-format batch export
+
+    Examples:
+        ingesta export -m ./media -o ./exports -n "Project_001"
+        ingesta export -m ./media -o ./exports -n "Project_001" -f premiere -f edl
+        ingesta export -m ./media -o ./exports -n "Project" --template documentary
+    """
+    setup_logging(ctx.obj['verbose'])
+    
+    from .analysis import ContentAnalyzer
+    from pathlib import Path
+    
+    media_path = Path(media_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Parse formats
+    formats = list(export_formats)
+    if 'all' in formats:
+        formats = ['premiere', 'resolve', 'fcpxml', 'edl']
+    
+    click.echo(f"📁 Exporting NLE projects...")
+    click.echo(f"   Media: {media_path}")
+    click.echo(f"   Output: {output_path}")
+    click.echo(f"   Name: {name}")
+    click.echo(f"   Formats: {', '.join(formats)}")
+    click.echo(f"   FPS: {fps}")
+    click.echo(f"   Resolution: {resolution}")
+    
+    if template:
+        click.echo(f"   Template: {template}")
+    
+    try:
+        # Analyze media
+        click.echo("\n🔍 Analyzing media...")
+        analyzer = ContentAnalyzer()
+        analyses = analyzer.analyze_directory(media_path)
+        
+        if not analyses:
+            click.echo("❌ No media files found", err=True)
+            sys.exit(1)
+        
+        click.echo(f"   Found {len(analyses)} clips")
+        
+        # Create export manager
+        manager = ExportManager(fps, resolution)
+        
+        # Create timeline
+        timeline = manager.create_timeline_from_analyses(name, analyses)
+        
+        # Get template if specified
+        template_obj = None
+        if template:
+            from .templates import get_template_manager
+            template_obj = get_template_manager().get_template_by_name(template)
+            if template_obj:
+                click.echo(f"   Using template: {template_obj.name}")
+        
+        # Parse export formats
+        export_formats_enum = []
+        for fmt in formats:
+            try:
+                export_formats_enum.append(ExportFormat(fmt))
+            except ValueError:
+                click.echo(f"⚠️  Unknown format: {fmt}", err=True)
+        
+        # Export
+        click.echo("\n📤 Exporting...")
+        results = manager.export(timeline, output_path, export_formats_enum, template_obj)
+        
+        if results:
+            click.echo("\n✅ Export complete!")
+            click.echo("\nGenerated files:")
+            for fmt, path in results.items():
+                click.echo(f"   • {fmt.value.upper()}: {path}")
+        else:
+            click.echo("\n❌ No files exported", err=True)
+            sys.exit(1)
+        
+    except Exception as e:
+        click.echo(f"\n❌ Export failed: {e}", err=True)
+        logger.error(f"Export error: {e}", exc_info=True)
         sys.exit(1)
 
 
