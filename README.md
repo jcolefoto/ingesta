@@ -1,6 +1,38 @@
 # Media Ingestion Tool
 
-A Python-based media ingestion tool that combines Shotput Pro-style offloading with verification and Pluralize-style audio sync capabilities.
+A professional-grade media ingestion tool that combines Shotput Pro-style offloading with verification and Pluralize-style audio sync capabilities. Built for assistant editors and DITs who need reliable, fast, and secure media management.
+
+## Why Ingesta?
+
+**Save Hours on Every Shoot Day**
+- Automated transcription, frame analysis, and metadata extraction eliminate manual logging
+- Edit-ready deliverables (Premiere/Resolve/FCP projects, proxy files, transcripts) ready in minutes, not hours
+- TUI workflow guides you through offload → report → deliverables in one seamless process
+
+**Local-Only Security**
+- All processing happens on your machine—no media, audio, or data ever leaves your system
+- No cloud dependencies, no subscription required, no internet needed for core features
+- Perfect for sensitive client work, NDAs, and productions requiring chain-of-custody documentation
+
+**Offload Verification You Can Trust**
+- MD5/SHA256 checksums generated during copy with automatic verification
+- Tamper-evident audit logs with hash chains for legal/professional compliance
+- Multi-destination copying to multiple drives simultaneously with integrity checks
+
+**Edit-Ready Deliverables Out of the Box**
+- NLE exports: Premiere Pro (.prproj), DaVinci Resolve (.xml), Final Cut Pro (.fcpxml), EDL
+- Project templates for documentary, commercial, wedding, corporate, and music video workflows
+- Professional PDF/CSV reports with thumbnails, transcriptions, and metadata
+- Proxy files, hero stills, and organized deliverable packages ready for client handoff
+
+## Capabilities at a Glance
+
+- **TUI Workflow** – Interactive step-by-step interface for project creation, media offload, reporting, and deliverable packaging
+- **Project Templates** – Pre-configured workflows for documentary, commercial, wedding, corporate, and music video productions
+- **NLE Exports** – Native project files for Premiere Pro, DaVinci Resolve, Final Cut Pro, and universal EDL format
+- **Client Deliverables** – Automated packaging of reports, proxies, transcripts, thumbnails, and metadata into professional ZIP archives
+- **Audit Logging** – Immutable chain-of-custody logs with tamper-evident hash chains for legal compliance
+- **Analysis & Transcription** – Local AI-powered transcription (whisper.cpp), frame analysis, audio technical metrics, and quality control
 
 ## Security & Privacy
 
