@@ -28,6 +28,11 @@ from .xml_parser import XMLParser, CameraMetadata
 from .thumbnails import ThumbnailExtractor
 from .bin_organizer import ClipOrganization, ClipBin, format_duration
 
+# Forward reference for type hint
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .delivery_checklist import EditorDeliveryChecklist
+
 
 class PDFReportGenerator:
     """Generate professional PDF reports from clip analyses."""
@@ -141,7 +146,106 @@ class PDFReportGenerator:
         ]))
         
         return badge_table
-    
+
+    def create_checklist_section(self, checklist: 'EditorDeliveryChecklist') -> List[Any]:
+        """Create delivery checklist section for PDF report."""
+        from .delivery_checklist import ChecklistItemSeverity, ChecklistCategory
+
+        elements = []
+
+        # Header with warning if critical issues exist
+        if checklist.has_critical_issues:
+            elements.append(Paragraph(
+                "⚠️ EDITOR DELIVERY CHECKLIST - CRITICAL ISSUES FOUND",
+                self.styles['SummaryTitle']
+            ))
+        else:
+            elements.append(Paragraph("Editor Delivery Checklist", self.styles['SummaryTitle']))
+
+        elements.append(Spacer(1, 0.2 * inch))
+
+        # Summary table
+        summary_data = [
+            ['Total Clips', str(checklist.total_clips)],
+            ['Total Issues', str(len(checklist.items))],
+            ['Critical', str(checklist.critical_count)],
+            ['Warnings', str(checklist.warning_count)],
+            ['Info', str(checklist.info_count)],
+        ]
+
+        summary_table = Table(summary_data, colWidths=[2.0 * inch, 3.0 * inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c5aa0')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f5f5f5')),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc')),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ]))
+
+        elements.append(summary_table)
+        elements.append(Spacer(1, 0.3 * inch))
+
+        # Group items by severity
+        for severity in [ChecklistItemSeverity.CRITICAL, ChecklistItemSeverity.WARNING, ChecklistItemSeverity.INFO]:
+            items = checklist.get_items_by_severity(severity)
+            if not items:
+                continue
+
+            # Severity header with color
+            if severity == ChecklistItemSeverity.CRITICAL:
+                header_color = colors.HexColor('#dc3545')  # Red
+                header_text = f"🔴 CRITICAL ({len(items)} items) - Must Fix"
+            elif severity == ChecklistItemSeverity.WARNING:
+                header_color = colors.HexColor('#ffc107')  # Yellow/Orange
+                header_text = f"🟡 WARNINGS ({len(items)} items) - Review"
+            else:
+                header_color = colors.HexColor('#17a2b8')  # Blue
+                header_text = f"🔵 INFO ({len(items)} items)"
+
+            elements.append(Paragraph(header_text, self.styles['Heading3']))
+            elements.append(Spacer(1, 0.1 * inch))
+
+            # Create table for items
+            item_data = [['Clip', 'Category', 'Issue']]
+            for item in items:
+                item_data.append([
+                    item.clip_name[:30] + '...' if len(item.clip_name) > 30 else item.clip_name,
+                    item.category.value.replace('_', ' ').title(),
+                    item.message[:50] + '...' if len(item.message) > 50 else item.message
+                ])
+
+            item_table = Table(item_data, colWidths=[2.0 * inch, 1.3 * inch, 3.0 * inch])
+            item_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), header_color),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f5f5f5')),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc')),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ]))
+
+            elements.append(item_table)
+            elements.append(Spacer(1, 0.2 * inch))
+
+        elements.append(PageBreak())
+        return elements
+
     def format_duration(self, seconds: float) -> str:
         """Format duration as MM:SS or HH:MM:SS."""
         if seconds < 3600:
@@ -385,7 +489,8 @@ class PDFReportGenerator:
     def generate_report(self, analyses: List[ClipAnalysis],
                        thumbnails: Optional[Dict[Path, List[Path]]] = None,
                        output_path: Optional[Path] = None,
-                       safe_to_format_status: Optional[dict] = None) -> Path:
+                       safe_to_format_status: Optional[dict] = None,
+                       checklist: Optional['EditorDeliveryChecklist'] = None) -> Path:
         """
         Generate PDF report from clip analyses.
 
@@ -394,6 +499,7 @@ class PDFReportGenerator:
             thumbnails: Optional dict mapping video paths to thumbnail paths
             output_path: Override output path
             safe_to_format_status: Optional status dict from ingestion job
+            checklist: Optional delivery checklist for editors
 
         Returns:
             Path to generated PDF file
@@ -402,13 +508,13 @@ class PDFReportGenerator:
             pdf_path = Path(output_path)
         else:
             pdf_path = self.output_path
-        
+
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self.logger.info(f"Generating PDF report: {pdf_path}")
-        
+
         thumbnails = thumbnails or {}
-        
+
         # Create document
         doc = SimpleDocTemplate(
             str(pdf_path),
@@ -418,15 +524,19 @@ class PDFReportGenerator:
             topMargin=self.MARGIN,
             bottomMargin=self.MARGIN
         )
-        
+
         # Build document elements
         elements = []
-        
+
         # Cover page
         elements.extend(self.create_cover_page())
-        
+
         # Summary section
         elements.extend(self.create_summary_section(analyses, safe_to_format_status))
+
+        # Add delivery checklist if provided
+        if checklist and checklist.items:
+            elements.extend(self.create_checklist_section(checklist))
         
         # Individual clip sections
         elements.append(Paragraph("Clip Details", self.styles['Heading1']))

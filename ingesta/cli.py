@@ -19,7 +19,8 @@ from .checksum import get_supported_algorithms
 from .reports import (
     ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator, BinOrganizer,
     LocalTranscriber, LocalFrameAnalyzer, AudioTechAnalyzer, MetadataExtractor,
-    DuplicateDetector, BadClipDetector, ProxyGenerator, KeywordTagger
+    DuplicateDetector, BadClipDetector, ProxyGenerator, KeywordTagger,
+    DeliveryChecklistGenerator
 )
 from .project_manager import ProjectManager, get_project_manager
 from .auto import AutoWorkflow
@@ -680,13 +681,28 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
                     thumbs = extractor.extract_thumbnails_for_clip(analysis.file_path)
                     thumbnail_map[analysis.file_path] = thumbs
         
-        # Step 3: Generate reports
-        generated_files = []
-        
+        # Step 3: Generate delivery checklist for editor
+        click.echo("\nGenerating editor delivery checklist...")
+        checklist_gen = DeliveryChecklistGenerator()
+        checklist = checklist_gen.generate_checklist(analyses)
+        click.echo(f"  Found {len(checklist.items)} items:")
+        click.echo(f"    - Critical: {checklist.critical_count}")
+        click.echo(f"    - Warnings: {checklist.warning_count}")
+        click.echo(f"    - Info: {checklist.info_count}")
+
+        # Export checklist files
+        checklist_txt_path = checklist_gen.export_checklist_text(checklist, output_path / "delivery_checklist.txt")
+        checklist_csv_path = checklist_gen.export_checklist_csv(checklist, output_path / "delivery_checklist.csv")
+        click.echo(f"  ✓ Checklist TXT: {checklist_txt_path}")
+        click.echo(f"  ✓ Checklist CSV: {checklist_csv_path}")
+
+        # Step 4: Generate reports
+        generated_files = [checklist_txt_path, checklist_csv_path]
+
         # Determine project name
         proj_name = project_name or media_path.name or "Media Ingest Report"
         dest_list = list(dest_path) if dest_path else []
-        
+
         if report_format in ['pdf', 'both']:
             click.echo("\nGenerating PDF report...")
             pdf_generator = PDFReportGenerator(
@@ -695,7 +711,7 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
                 source_path=source_path or str(media_path),
                 destination_paths=dest_list
             )
-            pdf_path = pdf_generator.generate_report(analyses, thumbnail_map)
+            pdf_path = pdf_generator.generate_report(analyses, thumbnail_map, checklist=checklist)
             generated_files.append(pdf_path)
             click.echo(f"  ✓ PDF: {pdf_path}")
         

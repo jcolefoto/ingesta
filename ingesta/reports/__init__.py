@@ -32,6 +32,10 @@ from .duplicate_detector import DuplicateDetector, DuplicateInfo, find_duplicate
 from .bad_clip_detector import BadClipDetector, BadClipAnalysis, detect_bad_clips
 from .proxy_generator import ProxyGenerator, ProxyResult, generate_proxy
 from .keyword_tagger import KeywordTagger, KeywordTags, extract_keywords
+from .delivery_checklist import (
+    DeliveryChecklistGenerator, EditorDeliveryChecklist, ChecklistItem,
+    ChecklistItemSeverity, ChecklistCategory, generate_delivery_checklist
+)
 
 __all__ = [
     'XMLParser',
@@ -67,4 +71,10 @@ __all__ = [
     'KeywordTagger',
     'KeywordTags',
     'extract_keywords',
+    'DeliveryChecklistGenerator',
+    'EditorDeliveryChecklist',
+    'ChecklistItem',
+    'ChecklistItemSeverity',
+    'ChecklistCategory',
+    'generate_delivery_checklist',
 ]
