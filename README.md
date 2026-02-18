@@ -26,6 +26,7 @@ A Python-based media ingestion tool that combines Shotput Pro-style offloading w
 - Parse camera XML sidecar files (Sony, Canon, Blackmagic)
 - Content classification (B-roll, interview, establishing shots, etc.)
 - Summary statistics and breakdown by clip type
+- **ShotPut-style bin/clip organization** - Group clips by folder structure (A001, B002, Sound_001, etc.) for editor-ready workflows
 
 ## Installation
 
@@ -178,6 +179,19 @@ ingesta report \
   -s /Volumes/CARD001 \
   -d /Backup/Project001 \
   -d /Archive/Project001
+
+# ShotPut-style bin organization (groups clips by folder: A001, B002, Sound_001, etc.)
+ingesta report -m ./ingested -o ./reports --group-by-folder
+
+# Organized structure example:
+# ./ingested/
+#   A001/           → Bin: A001 (Camera Reel)
+#     A001_001.MOV
+#     A001_002.MOV
+#   B002/           → Bin: B002 (Camera Reel)
+#     B002_001.MOV
+#   Sound_001/      → Bin: Sound_001 (Sound Roll)
+#     AUDIO_001.WAV
 ```
 
 The report command:
@@ -255,6 +269,9 @@ Options:
   --project-name TEXT Project name for report
   --source-path TEXT  Source media path for report metadata
   --dest-path PATH    Destination/archive path (can use multiple times)
+  --group-by-folder   Group clips by folder structure (ShotPut-style bins)
+                      Organizes clips into bins based on top-level folder names
+                      (e.g., A001, B002, Sound_001) with filename fallback
 ```
 
 ## Project Structure
@@ -274,7 +291,8 @@ ingesta/
 │       ├── xml_parser.py    # Camera XML sidecar parser
 │       ├── thumbnails.py    # Thumbnail extraction
 │       ├── csv_report.py    # CSV report generator
-│       └── pdf_report.py    # PDF report generator
+│       ├── pdf_report.py    # PDF report generator
+│       └── bin_organizer.py # ShotPut-style bin/clip organization
 ├── tests/
 │   └── test_*.py
 ├── README.md
@@ -315,6 +333,33 @@ Projects are generated as XML (.prproj) files:
 3. Generate clip metadata (duration, resolution, etc.)
 4. Build sequence with tracks
 5. Write Premiere-compatible XML
+
+### ShotPut-Style Bin Organization
+
+Bin organization provides editor-ready clip grouping based on production workflows:
+
+**Folder-Based Grouping:**
+Clips are organized by their top-level folder names:
+- `A001/`, `B002/`, `C001/` → Camera reel bins
+- `Sound_001/`, `Audio_A/` → Sound roll bins
+- `Scene_01/`, `Shot_001/` → Scene-based bins
+
+**Filename Fallback:**
+If clips are not in organized folders, bin names are extracted from filenames:
+- `A001_001.MOV` → Bin: A001
+- `CAM01_clip001.MP4` → Bin: CAM01
+- `SOUND_001.WAV` → Bin: SOUND_001
+
+**Bin Types:**
+- **Camera Reel**: Traditional A001, B002 naming
+- **Sound Roll**: Audio/sound recordings
+- **Scene**: Scene or shot-based organization
+- **Generic**: Other folder structures
+
+**Reports Generated:**
+- **Binned CSV**: Detailed clip list with Bin, Bin Type, and Reel columns
+- **Bin Summary CSV**: Overview of each bin with clip counts and durations
+- **Binned PDF**: Organized by bin sections with bin-level summaries
 
 ## License
 

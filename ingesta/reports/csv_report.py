@@ -12,6 +12,7 @@ from datetime import datetime
 
 from ..analysis import ClipAnalysis
 from .xml_parser import XMLParser, CameraMetadata
+from .bin_organizer import BinOrganizer, ClipOrganization, format_duration
 
 
 class CSVReportGenerator:
@@ -33,7 +34,10 @@ class CSVReportGenerator:
         'Codec',
         'Motion Score',
         'Audio Score',
-        'Confidence'
+        'Confidence',
+        'Bin',
+        'Bin Type',
+        'Reel'
     ]
     
     def __init__(self, output_path: Optional[Path] = None):
@@ -159,9 +163,38 @@ class CSVReportGenerator:
             'Codec': codec,
             'Motion Score': f"{analysis.motion_score:.2f}",
             'Audio Score': f"{analysis.audio_score:.2f}",
-            'Confidence': f"{analysis.confidence:.2f}"
+            'Confidence': f"{analysis.confidence:.2f}",
+            'Bin': "",
+            'Bin Type': "",
+            'Reel': ""
         }
         
+        return row
+    
+    def create_row_with_bin(self, analysis: ClipAnalysis,
+                           bin_name: str,
+                           bin_type: str,
+                           reel: str = "",
+                           metadata: Optional[CameraMetadata] = None,
+                           checksum: Optional[str] = None) -> Dict[str, str]:
+        """
+        Create a CSV row from clip analysis with bin information.
+        
+        Args:
+            analysis: ClipAnalysis object
+            bin_name: Name of the bin this clip belongs to
+            bin_type: Type of the bin
+            reel: Reel identifier
+            metadata: Optional CameraMetadata from XML sidecar
+            checksum: Optional checksum string
+            
+        Returns:
+            Dictionary representing a CSV row
+        """
+        row = self.create_row(analysis, metadata, checksum)
+        row['Bin'] = bin_name
+        row['Bin Type'] = bin_type
+        row['Reel'] = reel
         return row
     
     def generate_report(self, analyses: List[ClipAnalysis],
@@ -205,6 +238,126 @@ class CSVReportGenerator:
                 writer.writerow(row)
         
         self.logger.info(f"CSV report generated: {csv_path}")
+        return csv_path
+    
+    def generate_binned_report(self, organization: ClipOrganization,
+                              checksums: Optional[Dict[Path, str]] = None,
+                              output_path: Optional[Path] = None) -> Path:
+        """
+        Generate CSV report with ShotPut-style bin organization.
+        
+        Args:
+            organization: ClipOrganization with binned clips
+            checksums: Optional dict mapping file paths to checksums
+            output_path: Override output path
+            
+        Returns:
+            Path to generated CSV file
+        """
+        if output_path:
+            csv_path = Path(output_path)
+        else:
+            csv_path = self.output_path.parent / f"{self.output_path.stem}_binned.csv"
+        
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        self.logger.info(f"Generating binned CSV report: {csv_path}")
+        
+        checksums = checksums or {}
+        
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=self.DEFAULT_COLUMNS)
+            writer.writeheader()
+            
+            # Write clips from each bin
+            for bin_obj in organization.bins:
+                for analysis in bin_obj.clips:
+                    # Try to get XML metadata
+                    metadata = self.xml_parser.get_metadata_for_clip(analysis.file_path)
+                    
+                    # Get checksum if available
+                    checksum = checksums.get(analysis.file_path)
+                    
+                    # Create row with bin info
+                    reel = bin_obj.name if bin_obj.bin_type.value == 'camera_reel' else ""
+                    row = self.create_row_with_bin(
+                        analysis,
+                        bin_name=bin_obj.name,
+                        bin_type=bin_obj.bin_type.value.replace('_', ' ').title(),
+                        reel=reel,
+                        metadata=metadata,
+                        checksum=checksum
+                    )
+                    writer.writerow(row)
+            
+            # Write unclassified clips
+            for analysis in organization.unclassified:
+                metadata = self.xml_parser.get_metadata_for_clip(analysis.file_path)
+                checksum = checksums.get(analysis.file_path)
+                row = self.create_row_with_bin(
+                    analysis,
+                    bin_name="Unclassified",
+                    bin_type="Unclassified",
+                    reel="",
+                    metadata=metadata,
+                    checksum=checksum
+                )
+                writer.writerow(row)
+        
+        self.logger.info(f"Binned CSV report generated: {csv_path}")
+        return csv_path
+    
+    def generate_bin_summary_csv(self, organization: ClipOrganization,
+                                  output_path: Optional[Path] = None) -> Path:
+        """
+        Generate a summary CSV of bins.
+        
+        Args:
+            organization: ClipOrganization with binned clips
+            output_path: Override output path
+            
+        Returns:
+            Path to generated summary CSV file
+        """
+        if output_path:
+            csv_path = Path(output_path)
+        else:
+            csv_path = self.output_path.parent / f"{self.output_path.stem}_bin_summary.csv"
+        
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            
+            # Header
+            writer.writerow(['Bin Name', 'Bin Type', 'Clip Count', 'Total Duration', 'Percentage'])
+            
+            # Bin rows
+            total_clips = organization.total_clips
+            for bin_obj in organization.bins:
+                percentage = f"{bin_obj.clip_count/total_clips*100:.1f}%" if total_clips > 0 else "0%"
+                writer.writerow([
+                    bin_obj.name,
+                    bin_obj.bin_type.value.replace('_', ' ').title(),
+                    bin_obj.clip_count,
+                    format_duration(bin_obj.total_duration),
+                    percentage
+                ])
+            
+            # Unclassified row
+            if organization.unclassified:
+                unclass_count = len(organization.unclassified)
+                unclass_duration = sum(c.duration for c in organization.unclassified)
+                percentage = f"{unclass_count/total_clips*100:.1f}%" if total_clips > 0 else "0%"
+                writer.writerow([
+                    "Unclassified",
+                    "Unclassified",
+                    unclass_count,
+                    format_duration(unclass_duration),
+                    percentage
+                ])
+        
+        self.logger.info(f"Bin summary CSV generated: {csv_path}")
         return csv_path
     
     def generate_summary_csv(self, analyses: List[ClipAnalysis],

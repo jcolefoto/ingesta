@@ -16,7 +16,7 @@ from .sync import sync_audio_video
 from .premiere import create_premiere_project
 from .analysis import ContentAnalyzer
 from .checksum import get_supported_algorithms
-from .reports import ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator
+from .reports import ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator, BinOrganizer
 from .auto import AutoWorkflow
 
 
@@ -339,8 +339,10 @@ def analyze(ctx, media_dir, output, syncable_only):
               help='Source media path for report metadata')
 @click.option('--dest-path', '-d', multiple=True,
               help='Destination/archive path (can be used multiple times)')
+@click.option('--group-by-folder', '-g', is_flag=True,
+              help='Group clips by folder structure (ShotPut-style bins)')
 @click.pass_context
-def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path):
+def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, source_path, dest_path, group_by_folder):
     """
     Generate comprehensive reports from analyzed media.
     
@@ -352,6 +354,7 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
         ingesta report -m ./ingested -o ./reports
         ingesta report -m ./media --format pdf --no-thumbnails
         ingesta report -m ./media -n "Project Alpha" -s /card -d /backup1 -d /backup2
+        ingesta report -m ./ingested -g -o ./reports  # ShotPut-style bins
     """
     setup_logging(ctx.obj['verbose'])
     
@@ -364,6 +367,7 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
     click.echo(f"  Output directory: {output_path}")
     click.echo(f"  Format: {report_format}")
     click.echo(f"  Thumbnails: {'Yes' if thumbnails else 'No'}")
+    click.echo(f"  Group by folder: {'Yes' if group_by_folder else 'No'}")
     
     try:
         # Step 1: Analyze media
@@ -420,6 +424,45 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
             summary_path = csv_generator.generate_summary_csv(analyses)
             generated_files.append(summary_path)
             click.echo(f"  ✓ Summary CSV: {summary_path}")
+        
+        # Generate binned reports if requested
+        if group_by_folder:
+            click.echo("\nOrganizing clips into ShotPut-style bins...")
+            organizer = BinOrganizer()
+            organization = organizer.organize_by_folder(analyses, media_path)
+            
+            click.echo(f"  Created {len(organization.bins)} bins:")
+            for bin_obj in organization.bins:
+                click.echo(f"    - {bin_obj.name}: {bin_obj.clip_count} clips")
+            
+            if organization.unclassified:
+                click.echo(f"    - Unclassified: {len(organization.unclassified)} clips")
+            
+            if report_format in ['csv', 'both']:
+                click.echo("\nGenerating binned CSV reports...")
+                csv_generator = CSVReportGenerator(output_path=output_path / "report.csv")
+                
+                # Generate binned report
+                binned_csv_path = csv_generator.generate_binned_report(organization)
+                generated_files.append(binned_csv_path)
+                click.echo(f"  ✓ Binned CSV: {binned_csv_path}")
+                
+                # Generate bin summary
+                bin_summary_path = csv_generator.generate_bin_summary_csv(organization)
+                generated_files.append(bin_summary_path)
+                click.echo(f"  ✓ Bin Summary CSV: {bin_summary_path}")
+            
+            if report_format in ['pdf', 'both']:
+                click.echo("\nGenerating binned PDF report...")
+                pdf_generator = PDFReportGenerator(
+                    output_path=output_path / "report_binned.pdf",
+                    project_name=proj_name,
+                    source_path=source_path or str(media_path),
+                    destination_paths=dest_list
+                )
+                binned_pdf_path = pdf_generator.generate_binned_report(organization, thumbnail_map)
+                generated_files.append(binned_pdf_path)
+                click.echo(f"  ✓ Binned PDF: {binned_pdf_path}")
         
         # Summary
         click.echo(f"\n✓ Reports generated successfully!")
