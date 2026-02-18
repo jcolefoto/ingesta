@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QFrame
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QUrl
 
 
 class HistoryItem:
@@ -83,7 +83,6 @@ class HistoryPanel(QWidget):
     def dropEvent(self, event):
         """Handle drops for quick-create."""
         if event.mimeData().hasUrls():
-            from PySide6.QtCore import QUrl
             paths = []
             for url in event.mimeData().urls():
                 if url.isLocalFile():

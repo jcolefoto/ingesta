@@ -40,7 +40,7 @@ class IngestionWorker(QThread):
             
             job = ingest_media(
                 source=self.source,
-                destinations=self.destinations,
+                destinations=[str(p) for p in self.destinations],
                 checksum_algorithm="xxhash64",
                 verify=True,
                 progress_event_callback=progress_callback
@@ -227,8 +227,9 @@ class IngestaMainWindow(QMainWindow):
         # Clear existing
         while self.dest_badges_layout.count():
             item = self.dest_badges_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
         
         # Add badges
         if not self.dest_paths:
@@ -266,15 +267,26 @@ class IngestaMainWindow(QMainWindow):
         except Exception as e:
             return (False, f"Cannot read: {e}")
         
-        # Calculate size
+        # Calculate size with error handling for permission errors
         try:
             if path.is_dir():
-                total_size = sum(f.stat().st_size for f in path.rglob('*') if f.is_file())
+                total_size = 0
+                file_count = 0
+                for f in path.rglob('*'):
+                    if f.is_file():
+                        try:
+                            total_size += f.stat().st_size
+                            file_count += 1
+                            # Limit to prevent hanging on huge directories
+                            if file_count > 100000:
+                                return (True, f"Valid (>{100000} files)")
+                        except (OSError, PermissionError):
+                            continue
             else:
                 total_size = path.stat().st_size
             size_gb = total_size / (1024**3)
             return (True, f"Valid ({size_gb:.2f} GB)")
-        except:
+        except Exception:
             return (True, "Valid")
     
     def _validate_destinations(self, paths) -> tuple:

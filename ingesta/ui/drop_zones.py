@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional, Callable
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QApplication
+    QFileDialog, QApplication, QMessageBox
 )
 from PySide6.QtCore import Qt, Signal, QMimeData, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
@@ -86,7 +86,6 @@ class DropZone(QWidget):
                     break
                 paths.append(Path(path))
                 # Ask if they want to add more
-                from PySide6.QtWidgets import QMessageBox
                 reply = QMessageBox.question(
                     self, "Add More?",
                     f"Added {len(paths)} destination(s). Add another?",
@@ -151,7 +150,8 @@ class DropZone(QWidget):
         
         # Run validation if callback set
         if self.validation_callback and paths:
-            result = self.validation_callback(paths[0] if len(paths) == 1 else paths)
+            validation_input: Path = paths[0] if len(paths) == 1 else paths[0]  # Use first path for validation
+            result = self.validation_callback(validation_input)
             self.set_validation_state(result[0], result[1] if len(result) > 1 else "")
         else:
             self.set_validation_state(True, "")
@@ -187,8 +187,9 @@ class DropZone(QWidget):
         # Clear existing
         while self.files_layout.count():
             item = self.files_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
         
         # Add path labels
         for path in self.dropped_paths:
