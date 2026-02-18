@@ -36,6 +36,10 @@ from .delivery_checklist import (
     DeliveryChecklistGenerator, EditorDeliveryChecklist, ChecklistItem,
     ChecklistItemSeverity, ChecklistCategory, generate_delivery_checklist
 )
+from .multicam_detector import (
+    MulticamDetector, MulticamGroup, UnsyncedClipAnalysis, SyncAnalysisResult,
+    UnsyncedCategory, MulticamReason, detect_multicam_sequences, analyze_sync_failure
+)
 
 __all__ = [
     'XMLParser',
@@ -77,4 +81,12 @@ __all__ = [
     'ChecklistItemSeverity',
     'ChecklistCategory',
     'generate_delivery_checklist',
+    'MulticamDetector',
+    'MulticamGroup',
+    'UnsyncedClipAnalysis',
+    'SyncAnalysisResult',
+    'UnsyncedCategory',
+    'MulticamReason',
+    'detect_multicam_sequences',
+    'analyze_sync_failure',
 ]
