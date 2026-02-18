@@ -209,44 +209,207 @@ class IngestionWorker(QThread):
 
 
 class ReportsWorker(QThread):
-    """Worker thread for report generation (UI adapter)."""
+    """Worker thread for real report generation using existing report modules."""
 
+    progress = Signal(float, str)  # percent, status message
     completed = Signal(list)  # artifacts
     error = Signal(str)
 
-    def __init__(self, config, event_bus=None, step_index_map=None, total_steps: int = 0):
+    def __init__(self, config, media_path=None, event_bus=None, step_index_map=None, total_steps: int = 0):
         super().__init__()
         self.config = config
+        self.media_path = media_path
         self._event_bus = event_bus
         self._step_index_map = step_index_map or {}
         self._total_steps = total_steps
+        self._is_running = True
+
+    def _check_cancelled(self) -> bool:
+        """Check if worker should stop."""
+        return not self._is_running
 
     def run(self):
+        """Generate real reports using the report module logic."""
+        import logging
+        from pathlib import Path
+        from ..analysis import ContentAnalyzer
+        from ..reports import (
+            ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator,
+            LocalTranscriber, LocalFrameAnalyzer, AudioTechAnalyzer, MetadataExtractor,
+            DuplicateDetector, BadClipDetector, ProxyGenerator, KeywordTagger,
+            DeliveryChecklistGenerator
+        )
+
+        logger = logging.getLogger(__name__)
+
         try:
             self._emit_started("reports")
+
+            # Determine media path
+            if self.media_path and self.media_path.exists():
+                media_path = Path(self.media_path)
+            else:
+                # Try to use source path from main window context
+                media_path = Path("./media")
+
             output_dir = Path(self.config.output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            for percent in range(0, 101, 10):
-                time.sleep(0.25)
-                self._emit_progress("reports", percent, "Generating reports", percent, 100)
+            self._emit_progress("reports", 5, "Scanning for media files...", 0, 100)
 
+            # Step 1: Analyze media
+            logger.info(f"Analyzing clips in: {media_path}")
+            analyzer = ContentAnalyzer()
+            analyses = analyzer.analyze_directory(media_path)
+
+            if not analyses:
+                raise ValueError("No video files found in media directory")
+
+            self._emit_progress("reports", 15, f"Found {len(analyses)} clips", len(analyses), len(analyses))
+
+            if self._check_cancelled():
+                raise InterruptedError("Report generation cancelled")
+
+            # Step 2: Transcribe audio if requested
+            if self.config.transcribe:
+                self._emit_progress("reports", 25, "Transcribing audio (local AI)...", 0, len(analyses))
+                transcriber = LocalTranscriber(model="base")
+                for i, analysis in enumerate(analyses):
+                    if self._check_cancelled():
+                        raise InterruptedError("Report generation cancelled")
+                    self._emit_progress("reports", 25 + (i / len(analyses)) * 15,
+                                      f"Transcribing: {analysis.file_path.name}", i, len(analyses))
+                    result = transcriber.transcribe(analysis.file_path)
+                    if result:
+                        analysis.transcription = result.text
+                        analysis.transcription_excerpt = result.excerpt
+                        analysis.has_slate = result.has_slate
+                        analysis.has_end_mark = result.has_end_mark
+                        analysis.slate_text = result.slate_text
+
+            if self._check_cancelled():
+                raise InterruptedError("Report generation cancelled")
+
+            # Step 3: Analyze frames if requested
+            if self.config.analyze_frames:
+                self._emit_progress("reports", 40, "Analyzing frames...", 0, len(analyses))
+                frame_analyzer = LocalFrameAnalyzer()
+                for i, analysis in enumerate(analyses):
+                    if self._check_cancelled():
+                        raise InterruptedError("Report generation cancelled")
+                    self._emit_progress("reports", 40 + (i / len(analyses)) * 10,
+                                      f"Analyzing frames: {analysis.file_path.name}", i, len(analyses))
+                    result = frame_analyzer.analyze(analysis.file_path)
+                    if result:
+                        analysis.visual_description = result.description
+                        analysis.shot_type = result.shot_type.value
+
+            if self._check_cancelled():
+                raise InterruptedError("Report generation cancelled")
+
+            # Step 4: Extract thumbnails if requested
+            thumbnail_map = {}
+            if self.config.include_thumbnails:
+                self._emit_progress("reports", 50, "Extracting thumbnails...", 0, len(analyses))
+                thumb_dir = output_dir / "thumbnails"
+                thumb_dir.mkdir(parents=True, exist_ok=True)
+
+                with ThumbnailExtractor(output_dir=thumb_dir) as extractor:
+                    for i, analysis in enumerate(analyses):
+                        if self._check_cancelled():
+                            raise InterruptedError("Report generation cancelled")
+                        self._emit_progress("reports", 50 + (i / len(analyses)) * 15,
+                                          f"Extracting thumbnails: {analysis.file_path.name}", i, len(analyses))
+                        thumbs = extractor.extract_thumbnails_for_clip(analysis.file_path)
+                        thumbnail_map[analysis.file_path] = thumbs
+
+            if self._check_cancelled():
+                raise InterruptedError("Report generation cancelled")
+
+            # Step 5: Generate delivery checklist
+            self._emit_progress("reports", 65, "Generating delivery checklist...", 0, 100)
+            checklist_gen = DeliveryChecklistGenerator()
+            checklist = checklist_gen.generate_checklist(analyses)
+
+            # Export checklist files
+            checklist_txt_path = checklist_gen.export_checklist_text(checklist, output_dir / "delivery_checklist.txt")
+            checklist_csv_path = checklist_gen.export_checklist_csv(checklist, output_dir / "delivery_checklist.csv")
+
+            if self._check_cancelled():
+                raise InterruptedError("Report generation cancelled")
+
+            # Step 6: Generate reports
             artifacts = []
-            base_name = self.config.report_name or f"report_{time.strftime('%Y-%m-%d')}"
-            if self.config.generate_pdf:
-                pdf_path = output_dir / f"{base_name}.pdf"
-                pdf_path.write_text("Ingesta report placeholder.\n", encoding="utf-8")
-                artifacts.append({"name": pdf_path.name, "path": pdf_path, "type": "pdf"})
-            if self.config.generate_csv:
-                csv_path = output_dir / f"{base_name}.csv"
-                csv_path.write_text("clip,notes\n", encoding="utf-8")
-                artifacts.append({"name": csv_path.name, "path": csv_path, "type": "csv"})
+            proj_name = self.config.report_name or media_path.name or "Media Ingest Report"
 
+            # Add checklist artifacts
+            artifacts.append({
+                "name": checklist_txt_path.name,
+                "path": checklist_txt_path,
+                "type": "txt",
+                "size_bytes": checklist_txt_path.stat().st_size if checklist_txt_path.exists() else 0
+            })
+            artifacts.append({
+                "name": checklist_csv_path.name,
+                "path": checklist_csv_path,
+                "type": "csv",
+                "size_bytes": checklist_csv_path.stat().st_size if checklist_csv_path.exists() else 0
+            })
+
+            if self.config.generate_pdf:
+                self._emit_progress("reports", 75, "Generating PDF report...", 0, 100)
+                pdf_generator = PDFReportGenerator(
+                    output_path=output_dir / "report.pdf",
+                    project_name=proj_name,
+                    source_path=str(media_path),
+                    destination_paths=[]
+                )
+                pdf_path = pdf_generator.generate_report(analyses, thumbnail_map, checklist=checklist)
+                artifacts.append({
+                    "name": pdf_path.name,
+                    "path": pdf_path,
+                    "type": "pdf",
+                    "size_bytes": pdf_path.stat().st_size if pdf_path.exists() else 0
+                })
+
+            if self._check_cancelled():
+                raise InterruptedError("Report generation cancelled")
+
+            if self.config.generate_csv:
+                self._emit_progress("reports", 90, "Generating CSV reports...", 0, 100)
+                csv_generator = CSVReportGenerator(output_path=output_dir / "report.csv")
+                csv_path = csv_generator.generate_report(analyses)
+                artifacts.append({
+                    "name": csv_path.name,
+                    "path": csv_path,
+                    "type": "csv",
+                    "size_bytes": csv_path.stat().st_size if csv_path.exists() else 0
+                })
+
+                # Also generate summary CSV
+                summary_path = csv_generator.generate_summary_csv(analyses)
+                artifacts.append({
+                    "name": summary_path.name,
+                    "path": summary_path,
+                    "type": "csv",
+                    "size_bytes": summary_path.stat().st_size if summary_path.exists() else 0
+                })
+
+            self._emit_progress("reports", 100, "Complete", 100, 100)
             self._emit_completed("reports", {"artifacts": [a["name"] for a in artifacts]})
             self.completed.emit(artifacts)
+
+        except InterruptedError:
+            self._emit_failed("reports", "Cancelled")
+            self.error.emit("Report generation was cancelled")
         except Exception as e:
+            logger.error(f"Report generation failed: {e}")
             self._emit_failed("reports", str(e))
             self.error.emit(str(e))
+
+    def stop(self):
+        """Request stop."""
+        self._is_running = False
 
     def _emit_started(self, step_id: str):
         if not self._event_bus:
@@ -259,6 +422,150 @@ class ReportsWorker(QThread):
             total_steps=self._total_steps,
             step_type=step_id,
             input_data={},
+        ))
+
+    def _emit_progress(self, step_id: str, percent: float, current_item: str,
+                       items_processed: int, items_total: int):
+        if not self._event_bus:
+            return
+        self._event_bus.emit(StepProgressEvent(
+            event_type=EventType.STEP_PROGRESS,
+            workflow_id="ingest-ui",
+            step_name=step_id,
+            step_index=self._step_index_map.get(step_id, 0),
+            total_steps=self._total_steps,
+            percent_complete=percent,
+            current_item=current_item,
+            items_processed=items_processed,
+            items_total=items_total,
+        ))
+
+    def _emit_completed(self, step_id: str, output_data: Optional[dict] = None):
+        if not self._event_bus:
+            return
+        self._event_bus.emit(StepCompletedEvent(
+            event_type=EventType.STEP_COMPLETED,
+            workflow_id="ingest-ui",
+            step_name=step_id,
+            step_index=self._step_index_map.get(step_id, 0),
+            total_steps=self._total_steps,
+            duration_seconds=0.0,
+            output_data=output_data or {},
+        ))
+
+    def _emit_failed(self, step_id: str, message: str):
+        if not self._event_bus:
+            return
+        self._event_bus.emit(StepFailedEvent(
+            event_type=EventType.STEP_FAILED,
+            workflow_id="ingest-ui",
+            step_name=step_id,
+            step_index=self._step_index_map.get(step_id, 0),
+            total_steps=self._total_steps,
+            error_message=message,
+            error_type="Error",
+            error_details={},
+        ))
+
+
+class TranscriptionWorker(QThread):
+    """Worker thread for background transcription with progress events."""
+
+    progress = Signal(float, str, int, int)  # percent, current_item, items_processed, items_total
+    clip_completed = Signal(str, object)  # clip_name, TranscriptionResult
+    completed = Signal(list)  # list of (clip_path, result) tuples
+    error = Signal(str)
+
+    def __init__(self, media_path: Path, event_bus=None, step_index_map=None, total_steps: int = 0, whisper_model: str = "base"):
+        super().__init__()
+        self.media_path = media_path
+        self._event_bus = event_bus
+        self._step_index_map = step_index_map or {}
+        self._total_steps = total_steps
+        self.whisper_model = whisper_model
+        self._is_running = True
+        self.results = []
+
+    def _check_cancelled(self) -> bool:
+        """Check if worker should stop."""
+        return not self._is_running
+
+    def run(self):
+        """Run transcription workflow on media files."""
+        import logging
+        from pathlib import Path
+        from ..reports import LocalTranscriber
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            self._emit_started("transcribe")
+
+            # Find video files
+            video_extensions = ('.mp4', '.mov', '.mxf', '.avi', '.mkv', '.mts', '.m2ts')
+            video_files = []
+            for ext in video_extensions:
+                video_files.extend(self.media_path.glob(f"**/*{ext}"))
+                video_files.extend(self.media_path.glob(f"**/*{ext.upper()}"))
+
+            video_files = list(set(video_files))  # Remove duplicates
+            total_files = len(video_files)
+
+            if total_files == 0:
+                raise ValueError(f"No video files found in {self.media_path}")
+
+            logger.info(f"Found {total_files} video files to transcribe")
+            self._emit_progress("transcribe", 0, f"Found {total_files} clips", 0, total_files)
+
+            # Initialize transcriber
+            transcriber = LocalTranscriber(model=self.whisper_model)
+
+            # Transcribe each file
+            for i, video_file in enumerate(video_files):
+                if self._check_cancelled():
+                    raise InterruptedError("Transcription cancelled")
+
+                percent = (i / total_files) * 100
+                self._emit_progress("transcribe", percent, f"Transcribing: {video_file.name}", i, total_files)
+                self.progress.emit(percent, video_file.name, i, total_files)
+
+                try:
+                    result = transcriber.transcribe(video_file)
+                    if result:
+                        self.results.append((str(video_file), result))
+                        self.clip_completed.emit(video_file.name, result)
+                        logger.info(f"Transcribed {video_file.name}: {result.excerpt[:50]}...")
+                except Exception as e:
+                    logger.warning(f"Failed to transcribe {video_file.name}: {e}")
+                    # Continue with other files even if one fails
+
+            self._emit_progress("transcribe", 100, "Transcription complete", total_files, total_files)
+            self._emit_completed("transcribe", {"transcribed_clips": len(self.results)})
+            self.completed.emit(self.results)
+
+        except InterruptedError:
+            self._emit_failed("transcribe", "Cancelled")
+            self.error.emit("Transcription was cancelled")
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            self._emit_failed("transcribe", str(e))
+            self.error.emit(str(e))
+
+    def stop(self):
+        """Request stop."""
+        self._is_running = False
+
+    def _emit_started(self, step_id: str):
+        if not self._event_bus:
+            return
+        self._event_bus.emit(StepStartedEvent(
+            event_type=EventType.STEP_STARTED,
+            workflow_id="ingest-ui",
+            step_name=step_id,
+            step_index=self._step_index_map.get(step_id, 0),
+            total_steps=self._total_steps,
+            step_type=step_id,
+            input_data={"media_path": str(self.media_path)},
         ))
 
     def _emit_progress(self, step_id: str, percent: float, current_item: str,
@@ -409,6 +716,8 @@ class IngestaMainWindow(QMainWindow):
         self._total_steps = len(DEFAULT_STEPS)
         self._running_features: set = set()
         self._cancelled_features: set = set()
+        self._current_reports_worker: Optional[ReportsWorker] = None
+        self._current_transcription_worker: Optional[TranscriptionWorker] = None
 
         # Subscribe to workflow events
         self._subscribe_to_events()
@@ -1096,7 +1405,12 @@ class IngestaMainWindow(QMainWindow):
         self._running_features.add(feature_id)
         self._cancelled_features.discard(feature_id)
 
-        # Create and start worker for this feature
+        # Handle transcription specially with real implementation
+        if feature_id == "transcribe":
+            self._start_transcription_worker()
+            return
+
+        # Create and start generic worker for other features
         worker = FeatureWorker(
             feature_id=feature_id,
             event_bus=self._event_bus,
@@ -1109,10 +1423,101 @@ class IngestaMainWindow(QMainWindow):
 
         self._update_footer_status(f"Running: {feature_id}")
 
+    def _start_transcription_worker(self):
+        """Start the real transcription worker."""
+        # Determine media path
+        media_path = None
+        if self.source_path and self.source_path.exists():
+            media_path = self.source_path
+        elif self.dest_paths and len(self.dest_paths) > 0:
+            media_path = self.dest_paths[0]
+        else:
+            # Prompt user to select media directory
+            from PySide6.QtWidgets import QFileDialog
+            path = QFileDialog.getExistingDirectory(
+                self, "Select Media Directory for Transcription",
+                str(Path.home()),
+                QFileDialog.Option.ShowDirsOnly
+            )
+            if path:
+                media_path = Path(path)
+            else:
+                self._running_features.discard("transcribe")
+                self._update_footer_status("Transcription cancelled - no media directory selected")
+                return
+
+        # Create and start transcription worker
+        worker = TranscriptionWorker(
+            media_path=media_path,
+            event_bus=self._event_bus,
+            step_index_map=self._step_index_map,
+            total_steps=self._total_steps,
+            whisper_model="base"
+        )
+
+        # Connect signals
+        worker.progress.connect(self._on_transcription_progress)
+        worker.clip_completed.connect(self._on_transcription_clip_completed)
+        worker.completed.connect(self._on_transcription_completed)
+        worker.error.connect(self._on_transcription_error)
+
+        self._current_transcription_worker = worker
+        worker.start()
+        self._update_footer_status(f"Starting transcription on: {media_path}")
+
+    def _on_transcription_progress(self, percent: float, current_item: str, items_processed: int, items_total: int):
+        """Handle transcription progress."""
+        if hasattr(self, 'feature_cards'):
+            card = self.feature_cards.get_card("transcribe")
+            if card:
+                card.set_progress(percent, current_item, items_processed, items_total)
+
+    def _on_transcription_clip_completed(self, clip_name: str, result):
+        """Handle completion of a single clip transcription."""
+        # Could update UI to show transcription results per clip
+        self._update_footer_status(f"Transcribed: {clip_name}")
+
+    def _on_transcription_completed(self, results):
+        """Handle transcription workflow completion."""
+        self._running_features.discard("transcribe")
+        self._current_transcription_worker = None
+        transcribed_count = len(results)
+        self._update_footer_status(f"✓ Transcription complete: {transcribed_count} clips processed")
+
+        # Show results in a dialog or panel
+        if results:
+            QMessageBox.information(
+                self,
+                "Transcription Complete",
+                f"Successfully transcribed {transcribed_count} clips.\n\n"
+                f"Transcriptions are included in reports when 'Transcribe audio' is enabled."
+            )
+
+    def _on_transcription_error(self, message: str):
+        """Handle transcription error."""
+        self._running_features.discard("transcribe")
+        self._current_transcription_worker = None
+        self._update_footer_status(f"✗ Transcription failed: {message}")
+
+        QMessageBox.critical(
+            self,
+            "Transcription Failed",
+            f"Failed to transcribe media:\n\n{message}"
+        )
+
     def _on_feature_cancel_requested(self, feature_id: str):
         """Handle feature cancel request."""
         self._cancelled_features.add(feature_id)
         self._running_features.discard(feature_id)
+
+        # Cancel specific workers
+        if feature_id == "transcribe" and self._current_transcription_worker:
+            self._current_transcription_worker.stop()
+            self._current_transcription_worker = None
+        elif feature_id == "reports" and self._current_reports_worker:
+            self._current_reports_worker.stop()
+            self._current_reports_worker = None
+
         self._update_footer_status(f"Cancelled: {feature_id}")
 
     def _on_feature_enabled_changed(self, feature_id: str, enabled: bool):
@@ -1130,35 +1535,92 @@ class IngestaMainWindow(QMainWindow):
         self._update_footer_status(f"Error in {feature_id}: {message}")
 
     def _on_reports_generate(self):
-        """Handle reports generation request."""
+        """Handle reports generation request with real report generation."""
         config = self.reports_panel.get_config()
+
+        # Determine media path - use source path if available, otherwise ask user
+        media_path = None
+        if self.source_path and self.source_path.exists():
+            media_path = self.source_path
+        elif self.dest_paths and len(self.dest_paths) > 0:
+            # Use first destination as media path
+            media_path = self.dest_paths[0]
+        else:
+            # Prompt user to select media directory
+            from PySide6.QtWidgets import QFileDialog
+            path = QFileDialog.getExistingDirectory(
+                self, "Select Media Directory",
+                str(Path.home()),
+                QFileDialog.Option.ShowDirsOnly
+            )
+            if path:
+                media_path = Path(path)
+            else:
+                self._update_footer_status("Report generation cancelled - no media directory selected")
+                return
+
+        # Clear previous artifacts
+        self.reports_panel.clear_artifacts()
+
+        # Create and start worker
         worker = ReportsWorker(
             config=config,
+            media_path=media_path,
             event_bus=self._event_bus,
             step_index_map=self._step_index_map,
             total_steps=self._total_steps
         )
+
+        # Connect signals
+        worker.progress.connect(self._on_reports_progress)
         worker.completed.connect(self._on_reports_completed)
         worker.error.connect(self._on_reports_error)
+
+        # Store reference for potential cancellation
+        self._current_reports_worker = worker
+
         worker.start()
         self.reports_panel.set_generating(True, "Starting report generation...")
-        self._update_footer_status("Generating reports...")
+        self._update_footer_status(f"Generating reports from: {media_path}")
+
+    def _on_reports_progress(self, percent: float, status: str):
+        """Handle report generation progress updates."""
+        self.reports_panel.set_progress(percent, status)
 
     def _on_reports_completed(self, artifacts):
-        """Handle reports completion."""
+        """Handle reports completion - populate artifact list and enable open actions."""
         self.reports_panel.set_generating(False)
+
+        # Add artifacts to the panel
         for artifact in artifacts:
             self.reports_panel.add_artifact(
                 name=artifact["name"],
                 path=artifact["path"],
-                artifact_type=artifact["type"]
+                artifact_type=artifact["type"],
+                size_bytes=artifact.get("size_bytes", 0)
             )
-        self._update_footer_status("Reports generated successfully")
+
+        # Show success message
+        artifact_count = len(artifacts)
+        self._update_footer_status(f"✓ Reports generated successfully: {artifact_count} artifacts created")
+
+        # Clean up worker reference
+        self._current_reports_worker = None
 
     def _on_reports_error(self, message: str):
         """Handle reports error."""
         self.reports_panel.set_generating(False)
-        self._update_footer_status(f"Report generation failed: {message}")
+        self._update_footer_status(f"✗ Report generation failed: {message}")
+
+        # Show error dialog
+        QMessageBox.critical(
+            self,
+            "Report Generation Failed",
+            f"Failed to generate reports:\n\n{message}"
+        )
+
+        # Clean up worker reference
+        self._current_reports_worker = None
 
     def _on_progress(self, event):
         """Handle progress update."""
@@ -1383,7 +1845,16 @@ class IngestaMainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
-            
             self.current_worker.stop()
-        
+
+        # Stop any running report workers
+        if self._current_reports_worker and self._current_reports_worker.isRunning():
+            self._current_reports_worker.stop()
+            self._current_reports_worker.wait(1000)
+
+        # Stop any running transcription workers
+        if self._current_transcription_worker and self._current_transcription_worker.isRunning():
+            self._current_transcription_worker.stop()
+            self._current_transcription_worker.wait(1000)
+
         event.accept()
