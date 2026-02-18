@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ingesta"
+version = "1.0.0"
+description = "Production-grade media ingestion tool with verification and sync"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Cole Baird", email = "colebairdmedia@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Multimedia :: Video",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "click>=8.0.0",
+    "tqdm>=4.65.0",
+    "xxhash>=3.0.0",
+    "numpy>=1.24.0",
+    "lxml>=4.9.0",
+    "reportlab>=4.0.0",
+    "Pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+sync = [
+    "librosa>=0.10.0",
+    "soundfile>=0.12.0",
+    "scipy>=1.10.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+ingesta = "ingesta.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/jcolefoto/ingesta"
+Issues = "https://github.com/jcolefoto/ingesta/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ingesta*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

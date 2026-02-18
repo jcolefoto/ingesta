@@ -13,8 +13,15 @@ import subprocess
 import json
 
 import numpy as np
-import librosa
-import soundfile as sf
+
+try:
+    import librosa
+    import soundfile as sf
+    SYNC_DEPS_AVAILABLE = True
+except ImportError:
+    SYNC_DEPS_AVAILABLE = False
+    librosa = None
+    sf = None
 
 
 @dataclass
@@ -42,6 +49,11 @@ class WaveformSync:
             sample_rate: Target sample rate for analysis (default: 22050)
             tolerance: Maximum allowed offset in seconds (default: 0.5)
         """
+        if not SYNC_DEPS_AVAILABLE:
+            raise ImportError(
+                "Sync functionality requires librosa and soundfile. "
+                "Install with: pip install ingesta[sync]"
+            )
         self.sample_rate = sample_rate
         self.tolerance = tolerance
     
