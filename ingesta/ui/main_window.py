@@ -7,9 +7,11 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QPushButton, QProgressBar, QFrame,
-    QSplitter, QMessageBox, QApplication
+    QSplitter, QMessageBox, QApplication, QMenuBar,
+    QMenu, QStatusBar, QSizePolicy
 )
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 
 from .drop_zones import SourceDropZone, DestinationDropZone
 from .history_panel import HistoryPanel, HistoryItem
@@ -72,9 +74,113 @@ class IngestaMainWindow(QMainWindow):
         self.dest_paths: List[Path] = []
         self.current_worker: Optional[IngestionWorker] = None
         self.current_history_item: Optional[HistoryItem] = None
+        self.total_files: int = 0
+        self.total_size_bytes: int = 0
         
+        self._setup_menu_bar()
         self._setup_ui()
+        self._setup_status_bar()
         self._update_start_button()
+        self._setup_shortcuts()
+    
+    def _setup_menu_bar(self):
+        """Setup menu bar with File and Help menus."""
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu("&File")
+        
+        # Clear All action
+        clear_action = QAction("&Clear All", self)
+        clear_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        clear_action.triggered.connect(self._on_clear_all)
+        file_menu.addAction(clear_action)
+        
+        file_menu.addSeparator()
+        
+        # Exit action
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Help menu
+        help_menu = menubar.addMenu("&Help")
+        
+        # About action
+        about_action = QAction("&About", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+    
+    def _setup_status_bar(self):
+        """Setup status bar with file info."""
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        
+        # File count label
+        self.status_files_label = QLabel("Files: 0")
+        self.status_bar.addWidget(self.status_files_label)
+        
+        # Size label
+        self.status_size_label = QLabel("Size: 0 GB")
+        self.status_bar.addWidget(self.status_size_label)
+        
+        # Status message
+        self.status_msg_label = QLabel("Ready")
+        self.status_bar.addPermanentWidget(self.status_msg_label)
+    
+    def _setup_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        # Cmd/Ctrl+O - Select Source
+        shortcut_source = QShortcut(QKeySequence("Ctrl+O"), self)
+        shortcut_source.activated.connect(self._on_shortcut_source)
+        
+        # Cmd/Ctrl+D - Select Destinations  
+        shortcut_dest = QShortcut(QKeySequence("Ctrl+D"), self)
+        shortcut_dest.activated.connect(self._on_shortcut_dest)
+        
+        # Cmd/Ctrl+Return - Start Ingestion
+        shortcut_start = QShortcut(QKeySequence("Ctrl+Return"), self)
+        shortcut_start.activated.connect(self._on_start)
+    
+    def _on_shortcut_source(self):
+        """Handle Cmd+O shortcut."""
+        self.source_zone._on_browse()
+    
+    def _on_shortcut_dest(self):
+        """Handle Cmd+D shortcut."""
+        self.dest_zone._on_browse()
+    
+    def _on_clear_all(self):
+        """Clear all selections."""
+        self.source_path = None
+        self.dest_paths = []
+        self.total_files = 0
+        self.total_size_bytes = 0
+        
+        self.source_zone.clear()
+        self.dest_zone.clear()
+        self.source_badge.setText("No source selected")
+        self._update_destination_badges()
+        self._update_start_button()
+        self._update_status_bar()
+    
+    def _update_status_bar(self):
+        """Update status bar labels."""
+        self.status_files_label.setText(f"Files: {self.total_files}")
+        size_gb = self.total_size_bytes / (1024**3)
+        self.status_size_label.setText(f"Size: {size_gb:.2f} GB")
+    
+    def _show_about(self):
+        """Show about dialog."""
+        QMessageBox.about(
+            self,
+            "About Ingesta",
+            "<h2>Ingesta</h2>"
+            "<p>Media Ingestion & Verification Tool</p>"
+            "<p>Version 1.0.0</p>"
+            "<p>Drag and drop media cards or folders to copy with verification.</p>"
+        )
     
     def _setup_ui(self):
         """Setup the main UI."""
@@ -183,12 +289,14 @@ class IngestaMainWindow(QMainWindow):
         self.start_btn.setObjectName("success")
         self.start_btn.setMinimumHeight(44)
         self.start_btn.setEnabled(False)
+        self.start_btn.setToolTip("Start copying and verifying files (Ctrl+Enter)")
         self.start_btn.clicked.connect(self._on_start)
         button_layout.addWidget(self.start_btn, stretch=1)
         
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setObjectName("danger")
         self.cancel_btn.setVisible(False)
+        self.cancel_btn.setToolTip("Cancel the current ingestion")
         self.cancel_btn.clicked.connect(self._on_cancel)
         button_layout.addWidget(self.cancel_btn)
         
@@ -214,6 +322,21 @@ class IngestaMainWindow(QMainWindow):
         if paths:
             self.source_path = paths[0]
             self.source_badge.setText(f"📁 {self.source_path.name}")
+            
+            # Calculate file count and size
+            try:
+                if self.source_path.is_dir():
+                    files = [f for f in self.source_path.rglob('*') if f.is_file()]
+                    self.total_files = len(files)
+                    self.total_size_bytes = sum(f.stat().st_size for f in files)
+                else:
+                    self.total_files = 1
+                    self.total_size_bytes = self.source_path.stat().st_size
+            except Exception:
+                self.total_files = 0
+                self.total_size_bytes = 0
+            
+            self._update_status_bar()
             self._update_start_button()
     
     def _on_destinations_dropped(self, paths: List[Path]):
@@ -355,7 +478,9 @@ class IngestaMainWindow(QMainWindow):
         self.current_history_item = HistoryItem(
             source=self.source_path,
             destinations=self.dest_paths.copy(),
-            status="running"
+            status="running",
+            file_count=self.total_files,
+            total_size_bytes=self.total_size_bytes
         )
         self.history_panel.add_item(self.current_history_item)
         

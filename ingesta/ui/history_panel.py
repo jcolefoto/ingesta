@@ -14,16 +14,20 @@ class HistoryItem:
     """Represents a history entry."""
     
     def __init__(self, source: Path, destinations: List[Path], 
-                 status: str = "pending", timestamp: Optional[datetime] = None):
+                 status: str = "pending", timestamp: Optional[datetime] = None,
+                 file_count: int = 0, total_size_bytes: int = 0):
         self.source = source
         self.destinations = destinations
         self.status = status  # pending, running, success, failed
         self.timestamp = timestamp or datetime.now()
         self.id = f"{self.timestamp.isoformat()}_{source.name}"
+        self.file_count = file_count
+        self.total_size_bytes = total_size_bytes
     
     @property
     def display_title(self) -> str:
-        return f"{self.source.name} → {len(self.destinations)} destination(s)"
+        size_gb = self.total_size_bytes / (1024**3)
+        return f"{self.source.name} ({self.file_count} files, {size_gb:.1f} GB)"
     
     @property
     def display_subtitle(self) -> str:

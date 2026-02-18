@@ -215,6 +215,7 @@ class SourceDropZone(DropZone):
             accept_multiple=False,
             parent=parent
         )
+        self.browse_btn.setToolTip("Select source folder or file (Ctrl+O)")
     
     def _on_browse(self):
         """Override to allow file or folder selection."""
@@ -261,3 +262,4 @@ class DestinationDropZone(DropZone):
             parent=parent
         )
         self.browse_btn.setText("Add Destinations...")
+        self.browse_btn.setToolTip("Select destination folders (Ctrl+D)")
