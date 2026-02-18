@@ -94,11 +94,12 @@ class DropZone(QWidget):
     filesDropped = Signal(list)  # Emits list of Path objects
     filesChanged = Signal()  # Emitted when files are added or removed
     
-    def __init__(self, title: str, subtitle: str, accept_multiple: bool = True, parent=None):
+    def __init__(self, title: str, subtitle: str, accept_multiple: bool = True, show_list: bool = True, parent=None):
         super().__init__(parent)
         self.title = title
         self.subtitle = subtitle
         self.accept_multiple = accept_multiple
+        self.show_list = show_list
         self.dropped_paths: List[Path] = []
         self._path_set: Set[str] = set()  # For duplicate prevention
         self.is_drag_active = False
@@ -160,25 +161,29 @@ class DropZone(QWidget):
         layout.addLayout(self.stats_layout)
         
         # Scroll area for file list
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setMaximumHeight(150)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-        """)
-        
-        self.files_widget = QWidget()
-        self.files_layout = QVBoxLayout(self.files_widget)
-        self.files_layout.setSpacing(6)
-        self.files_layout.setContentsMargins(0, 0, 0, 0)
-        self.files_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
-        scroll.setWidget(self.files_widget)
-        layout.addWidget(scroll)
+        if self.show_list:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setMaximumHeight(150)
+            scroll.setStyleSheet("""
+                QScrollArea {
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+            
+            self.files_widget = QWidget()
+            self.files_layout = QVBoxLayout(self.files_widget)
+            self.files_layout.setSpacing(6)
+            self.files_layout.setContentsMargins(0, 0, 0, 0)
+            self.files_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            
+            scroll.setWidget(self.files_widget)
+            layout.addWidget(scroll)
+        else:
+            self.files_widget = None
+            self.files_layout = None
         
         # Buttons row
         button_layout = QHBoxLayout()
@@ -315,6 +320,8 @@ class DropZone(QWidget):
     
     def _update_files_display(self):
         """Update the files display widget with truncated names and tooltips."""
+        if not self.show_list or not self.files_layout:
+            return
         # Clear existing
         while self.files_layout.count():
             item = self.files_layout.takeAt(0)
@@ -416,13 +423,14 @@ class DropZone(QWidget):
         self._update_stats()
         
         # Clear display
-        while self.files_layout.count():
-            item = self.files_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        
-        self.files_layout.addStretch()
+        if self.show_list and self.files_layout:
+            while self.files_layout.count():
+                item = self.files_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+            
+            self.files_layout.addStretch()
         self.set_validation_state(None, "")
         self.filesChanged.emit()
     
@@ -455,11 +463,12 @@ class DropZone(QWidget):
 class SourceDropZone(DropZone):
     """Specialized drop zone for source selection."""
     
-    def __init__(self, parent=None):
+    def __init__(self, show_list: bool = False, parent=None):
         super().__init__(
             title="Drop Source Here",
             subtitle="Drag card/drive from Finder or click Browse",
             accept_multiple=False,
+            show_list=show_list,
             parent=parent
         )
         self.browse_btn.setToolTip("Select source folder or file (Ctrl+O)")
@@ -473,6 +482,7 @@ class DestinationDropZone(DropZone):
             title="Drop Destinations Here",
             subtitle="Drag one or more drives/folders from Finder",
             accept_multiple=True,
+            show_list=True,
             parent=parent
         )
         self.browse_btn.setText("Add Destination...")
