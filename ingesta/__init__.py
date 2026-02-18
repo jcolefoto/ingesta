@@ -9,7 +9,13 @@ __version__ = "1.0.0"
 __author__ = "jcolefoto"
 
 from .checksum import calculate_checksum, verify_checksum
-from .ingestion import ingest_media, IngestionJob
+from .ingestion import (
+    ingest_media,
+    IngestionJob,
+    ProgressEvent,
+    IngestionStage,
+    IngestionCompletion,
+)
 from .analysis import ClipAnalysis, ClipType, ContentAnalyzer
 
 # Optional: sync functionality (requires librosa)
@@ -34,6 +40,9 @@ __all__ = [
     "verify_checksum",
     "ingest_media",
     "IngestionJob",
+    "ProgressEvent",
+    "IngestionStage",
+    "IngestionCompletion",
     "ClipAnalysis",
     "ClipType",
     "ContentAnalyzer",
