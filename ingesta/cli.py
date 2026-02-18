@@ -27,6 +27,7 @@ from .tui import run_tui_workflow, WorkflowStep
 from .templates import get_template_manager, TemplateType
 from .exports import export_nle_project, ExportManager, ExportFormat
 from .deliverables import create_client_deliverable, DeliverableConfig
+from .audit import get_audit_logger, AuditLogger, AuditEventType
 
 
 # Setup logging
@@ -1299,6 +1300,93 @@ def template_export(ctx, template_name, output):
         click.echo(f"✅ Exported template: {output_path}")
     else:
         click.echo(f"❌ Failed to export template", err=True)
+        sys.exit(1)
+
+
+# Audit/Chain-of-Custody Commands
+@cli.group()
+def audit():
+    """Chain-of-custody audit logging and verification."""
+    pass
+
+
+@audit.command('show')
+@click.option('--project', '-p', help='Project ID for project-specific audit')
+@click.option('--output', '-o', type=click.Path(), help='Output report file path')
+@click.pass_context
+def audit_show(ctx, project, output):
+    """Show audit log for project or global."""
+    setup_logging(ctx.obj['verbose'])
+    
+    logger = get_audit_logger(project)
+    
+    click.echo(f"\n📋 Audit Log")
+    if project:
+        click.echo(f"   Project ID: {project}")
+    else:
+        click.echo(f"   Scope: Global")
+    click.echo(f"   Entries: {len(logger.entries)}")
+    
+    # Verify integrity
+    is_valid, errors = logger.verify_chain_integrity()
+    
+    if is_valid:
+        click.echo(f"   Chain Integrity: ✓ VALID")
+    else:
+        click.echo(f"   Chain Integrity: ✗ COMPROMISED")
+        for error in errors:
+            click.echo(f"      ! {error}")
+    
+    # Show recent entries
+    if logger.entries:
+        click.echo(f"\nRecent Activity:")
+        for entry in logger.entries[-5:]:
+            click.echo(f"   {entry.timestamp} | {entry.event_type} | {entry.event_description}")
+    
+    # Generate report if output specified
+    if output:
+        report_path = logger.generate_report(Path(output))
+        click.echo(f"\n✅ Report saved: {report_path}")
+
+
+@audit.command('export')
+@click.option('--project', '-p', help='Project ID')
+@click.option('--output', '-o', required=True, type=click.Path(), help='Output JSON file')
+@click.pass_context
+def audit_export(ctx, project, output):
+    """Export audit log as JSON."""
+    setup_logging(ctx.obj['verbose'])
+    
+    logger = get_audit_logger(project)
+    output_path = logger.export_json(Path(output))
+    
+    click.echo(f"✅ Exported audit log: {output_path}")
+    click.echo(f"   Entries: {len(logger.entries)}")
+
+
+@audit.command('verify')
+@click.option('--project', '-p', help='Project ID to verify')
+@click.pass_context
+def audit_verify(ctx, project):
+    """Verify audit chain integrity."""
+    setup_logging(ctx.obj['verbose'])
+    
+    logger = get_audit_logger(project)
+    
+    click.echo(f"\n🔍 Verifying Audit Chain Integrity...")
+    if project:
+        click.echo(f"   Project: {project}")
+    
+    is_valid, errors = logger.verify_chain_integrity()
+    
+    if is_valid:
+        click.echo(f"\n✅ Chain integrity verified - no tampering detected")
+        click.echo(f"   Total entries: {len(logger.entries)}")
+    else:
+        click.echo(f"\n❌ Chain integrity compromised!")
+        click.echo(f"   Errors found: {len(errors)}")
+        for error in errors:
+            click.echo(f"   ! {error}")
         sys.exit(1)
 
 
