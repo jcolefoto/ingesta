@@ -17,6 +17,7 @@ from .premiere import create_premiere_project
 from .analysis import ContentAnalyzer
 from .checksum import get_supported_algorithms
 from .reports import ThumbnailExtractor, PDFReportGenerator, CSVReportGenerator
+from .auto import AutoWorkflow
 
 
 # Setup logging
@@ -47,6 +48,7 @@ def cli(ctx, verbose):
     Pluralize-style audio sync capabilities.
     
     Commands:
+        auto       Full automated workflow (detect, ingest, analyze, report, premiere)
         ingest     Copy and verify media files
         sync       Sync external audio to video
         premiere   Create Adobe Premiere Pro project
@@ -435,6 +437,118 @@ def report(ctx, media_dir, output_dir, report_format, thumbnails, project_name, 
         
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('--source', '-s', type=click.Path(exists=True),
+              help='Source directory (auto-detect if not specified)')
+@click.option('--dest', '-d', type=click.Path(),
+              help='Destination directory (default: ./<project_name>)')
+@click.option('--project', '-p',
+              help='Project name (default: auto-generated)')
+@click.option('--template', '-t',
+              help='Project template to use (name or path)')
+@click.option('--fps', default=24.0, type=float,
+              help='Frame rate for Premiere project (default: 24)')
+@click.option('--resolution', '-r', default='1920x1080',
+              help='Resolution as WIDTHxHEIGHT (default: 1920x1080)')
+@click.option('--no-slate', is_flag=True,
+              help='Skip slate detection')
+@click.option('--no-thumbnails', is_flag=True,
+              help='Skip thumbnail extraction')
+@click.option('--no-reports', is_flag=True,
+              help='Skip report generation')
+@click.option('--no-premiere', is_flag=True,
+              help='Skip Premiere project creation')
+@click.pass_context
+def auto(ctx, source, dest, project, template, fps, resolution, no_slate, no_thumbnails, no_reports, no_premiere):
+    """
+    Automated workflow: detect cards, ingest, analyze, and create Premiere project.
+
+    Runs the complete pipeline in one command:
+    1. Auto-detect memory cards (if no source specified)
+    2. Ingest media with xxhash64 verification
+    3. Analyze clips for content type
+    4. Extract thumbnails
+    5. Detect slates from audio
+    6. Generate PDF + CSV reports
+    7. Create organized Premiere project with camera/reel bins
+
+    Examples:
+        ingesta auto                           # Auto-detect and process
+        ingesta auto --source /Volumes/CARD001 # Process specific card
+        ingesta auto --project "Client_001"    # Custom project name
+        ingesta auto --template corporate      # Use project template
+    """
+    setup_logging(ctx.obj['verbose'])
+
+    # Override template settings with CLI options
+    template_settings = {}
+    if no_slate:
+        template_settings['slate_detection'] = False
+    if no_thumbnails:
+        template_settings['thumbnails'] = False
+    if no_reports:
+        template_settings['generate_reports'] = False
+    if no_premiere:
+        template_settings['create_premiere'] = False
+
+    click.echo("🎬 Starting ingesta auto workflow...")
+    click.echo("")
+
+    try:
+        # Create and run workflow
+        workflow = AutoWorkflow(
+            project_name=project,
+            template=template,
+            output_dir=Path(dest) if dest else None,
+            verbose=ctx.obj['verbose']
+        )
+
+        # Apply CLI overrides
+        workflow.template.settings.update(template_settings)
+        if fps != 24.0:
+            workflow.template.settings['fps'] = fps
+        if resolution != '1920x1080':
+            workflow.template.settings['resolution'] = resolution
+
+        # Run the workflow
+        result = workflow.run(
+            source=Path(source) if source else None,
+            destinations=[Path(dest)] if dest else None
+        )
+
+        if result.success:
+            click.echo("")
+            click.echo("=" * 60)
+            click.echo("✅ WORKFLOW COMPLETE")
+            click.echo("=" * 60)
+            click.echo(f"Duration: {result.duration:.1f}s")
+            click.echo(f"Clips analyzed: {result.clips_analyzed}")
+            click.echo(f"Slates detected: {result.slates_detected}")
+            click.echo(f"")
+            click.echo(f"Output directory: {result.project_path}")
+
+            if result.premiere_project:
+                click.echo(f"Premiere project: {result.premiere_project}")
+
+            if result.errors:
+                click.echo(f"")
+                click.echo(f"Warnings ({len(result.errors)}):")
+                for error in result.errors:
+                    click.echo(f"  ⚠️  {error}")
+        else:
+            click.echo("")
+            click.echo("❌ WORKFLOW FAILED")
+            click.echo(f"Errors: {len(result.errors)}")
+            for error in result.errors:
+                click.echo(f"  • {error}")
+            sys.exit(1)
+
+    except Exception as e:
+        click.echo(f"")
+        click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
 
 

@@ -69,7 +69,16 @@ class ThumbnailExtractor:
     
     def calculate_timestamps(self, duration: float, count: Optional[int] = None) -> List[float]:
         """
-        Calculate evenly distributed timestamps for thumbnail extraction.
+        Calculate timestamps for thumbnail extraction.
+        
+        Pattern: First frame, last frame, and equally spaced frames in between.
+        Example with count=6:
+            - thumb_01: 0% (first frame)
+            - thumb_02: 20%
+            - thumb_03: 40%
+            - thumb_04: 60%
+            - thumb_05: 80%
+            - thumb_06: 100% (last frame)
         
         Args:
             duration: Total video duration in seconds
@@ -84,20 +93,16 @@ class ThumbnailExtractor:
         if duration <= 0 or count <= 0:
             return []
         
-        # Exclude the very beginning and end
-        margin = duration * 0.05  # 5% margin on each side
-        usable_duration = duration - (2 * margin)
-        
-        if usable_duration <= 0:
-            # Video too short, use middle point only
-            return [duration / 2]
-        
-        # Calculate evenly spaced timestamps
         if count == 1:
             return [duration / 2]
         
-        step = usable_duration / (count - 1)
-        timestamps = [margin + (i * step) for i in range(count)]
+        # Pattern: First, Last, and (count-2) equally spaced in between
+        timestamps = []
+        for i in range(count):
+            # Calculate position as percentage: 0%, 100%, and equally spaced in between
+            position = i / (count - 1)
+            timestamp = position * duration
+            timestamps.append(timestamp)
         
         return timestamps
     
