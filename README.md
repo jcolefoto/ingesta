@@ -1,6 +1,6 @@
 # Media Ingestion Tool
 
-A professional-grade media ingestion tool that combines Shotput Pro-style offloading with verification and Pluralize-style audio sync capabilities. Built for assistant editors and DITs who need reliable, fast, and secure media management.
+A professional-grade media ingestion tool with verified media offloading, audio synchronization, and comprehensive reporting. Built for assistant editors and DITs who need reliable, fast, and secure media management.
 
 ## Why Ingesta?
 
@@ -46,14 +46,14 @@ A professional-grade media ingestion tool that combines Shotput Pro-style offloa
 
 ## Features
 
-### 1. Media Offloading & Verification (Shotput Pro-style)
+### 1. Media Offloading & Verification
 - Copy media from memory cards/storage devices to destination drives
 - Generate MD5/SHA256 checksums during copy
 - Verify file integrity after transfer
 - Support multiple source/destination pairs
 - Progress tracking and detailed logging
 
-### 2. Audio Sync & Premiere Integration (Pluralize-style)
+### 2. Audio Sync & Premiere Integration
 - Sync external audio to video via waveform matching
 - Create Adobe Premiere Pro project files (.prproj)
 - Auto-align audio tracks based on waveform analysis
@@ -68,7 +68,7 @@ A professional-grade media ingestion tool that combines Shotput Pro-style offloa
 - Parse camera XML sidecar files (Sony, Canon, Blackmagic)
 - Content classification (B-roll, interview, establishing shots, etc.)
 - Summary statistics and breakdown by clip type
-- **ShotPut-style bin/clip organization** - Group clips by folder structure (A001, B002, Sound_001, etc.) for editor-ready workflows
+- **Folder-based bin organization** - Group clips by folder structure (A001, B002, Sound_001, etc.) for editor-ready workflows
 - **Local transcription** - Transcribe audio using whisper.cpp (fully offline)
 - **Frame analysis** - Generate visual descriptions and detect shot types (fully offline)
 - **Slate detection** - Automatically detect scene/take slates and end marks in audio
@@ -111,7 +111,7 @@ A professional-grade media ingestion tool that combines Shotput Pro-style offloa
 ### 7. Smart Multicam Detection
 - **Timecode overlap detection** to identify multicam sequences
 - **Multicam bin creation** for editor organization
-- **Intelligent unsynced clip analysis** - goes beyond PluralEyes:
+- **Intelligent unsynced clip analysis** - identifies sync issues with detailed reasoning:
   - Distinguishes B-roll from broken multicam
   - Detects timecode discontinuities
   - Matches slates/scenes across cameras
@@ -168,6 +168,63 @@ sudo apt-get install ffmpeg
 
 # Windows
 # Download from https://ffmpeg.org/download.html
+```
+
+## From Zero to Running
+
+Get up and running with ingesta in minutes:
+
+### Option 1: Command Line (CLI)
+
+The CLI is the fastest way to start processing media with full control over every option:
+
+```bash
+# 1. Clone and install
+git clone https://github.com/jcolefoto/ingesta.git
+cd ingesta
+pip install -e .
+
+# 2. Verify installation
+ingesta --version
+
+# 3. Run your first ingestion
+ingesta ingest --source /path/to/memory/card --dest /path/to/backup
+```
+
+### Option 2: Desktop UI (PySide6)
+
+For a visual, drag-and-drop interface with guided workflows:
+
+```bash
+# 1. Clone and install with UI extras
+git clone https://github.com/jcolefoto/ingesta.git
+cd ingesta
+pip install -e ".[ui]"
+
+# 2. Launch the UI
+ingesta-ui
+```
+
+Or use the convenience script:
+
+```bash
+# Make the script executable and run
+chmod +x scripts/run_ui.sh
+./scripts/run_ui.sh
+```
+
+### ⚠️ Important: Git Version Warning
+
+**If you encounter errors with `git --version` returning a hyphen**, this is a known issue with certain git configurations. The hyphen output can break version detection scripts.
+
+**Workaround:**
+```bash
+# Check your git version manually
+git --version
+
+# If it outputs something like "git version 2.x.x" with a hyphen issue,
+# you can bypass by setting the version explicitly:
+export GIT_VERSION="2.40.0"  # Replace with your actual version
 ```
 
 ## Usage
@@ -331,7 +388,7 @@ ingesta report \
   -d /Backup/Project001 \
   -d /Archive/Project001
 
-# ShotPut-style bin organization (groups clips by folder: A001, B002, Sound_001, etc.)
+# Folder-based bin organization (groups clips by folder: A001, B002, Sound_001, etc.)
 ingesta report -m ./ingested -o ./reports --group-by-folder
 
 # Organized structure example:
@@ -470,7 +527,7 @@ Options:
   --dest-path PATH              Destination/archive path (can use multiple times)
 
   # Organization
-  --group-by-folder             Group clips by folder structure (ShotPut-style bins)
+  --group-by-folder             Group clips by folder structure (production bins)
                                 Organizes clips into bins based on top-level folder names
                                 (e.g., A001, B002, Sound_001) with filename fallback
 
@@ -714,7 +771,7 @@ ingesta/
 │       ├── thumbnails.py          # Thumbnail extraction
 │       ├── csv_report.py          # CSV report generator
 │       ├── pdf_report.py          # PDF report generator
-│       ├── bin_organizer.py       # ShotPut-style bin/clip organization
+│       ├── bin_organizer.py       # Folder-based bin/clip organization
 │       ├── local_transcription.py # Local audio transcription (whisper.cpp)
 │       ├── frame_analysis.py      # Local frame analysis for visual descriptions
 │       ├── audio_tech.py          # Audio technical analysis (peak, RMS, clipping)
@@ -764,7 +821,7 @@ Projects are generated as XML (.prproj) files:
 4. Build sequence with tracks
 5. Write Premiere-compatible XML
 
-### ShotPut-Style Bin Organization
+### Folder-Based Bin Organization
 
 Bin organization provides editor-ready clip grouping based on production workflows:
 
@@ -1036,7 +1093,7 @@ This will generate:
 - Duplicate flags
 - Proxy files and hero stills
 - Keyword tags
-- ShotPut-style bin organization
+- Folder-based bin organization
 
 **Security Note:** All processing is done locally. No media, audio, or data is sent to external services.
 
@@ -1050,5 +1107,5 @@ Contributions welcome! Please submit pull requests or open issues on GitHub.
 
 ## Acknowledgments
 
-- Inspired by Shotput Pro and Pluralize workflows
+- Built with FFmpeg, librosa, and other open-source libraries
 - Uses FFmpeg, librosa, and other open-source libraries
