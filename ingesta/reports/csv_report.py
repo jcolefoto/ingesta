@@ -443,14 +443,16 @@ class CSVReportGenerator:
         return csv_path
     
     def generate_summary_csv(self, analyses: List[ClipAnalysis],
-                            output_path: Optional[Path] = None) -> Path:
+                            output_path: Optional[Path] = None,
+                            safe_to_format_status: Optional[dict] = None) -> Path:
         """
         Generate summary statistics CSV.
-        
+
         Args:
             analyses: List of ClipAnalysis objects
             output_path: Override output path
-            
+            safe_to_format_status: Optional safe to format status from ingestion job
+
         Returns:
             Path to generated summary CSV file
         """
@@ -458,29 +460,40 @@ class CSVReportGenerator:
             csv_path = Path(output_path)
         else:
             csv_path = self.output_path.parent / f"{self.output_path.stem}_summary.csv"
-        
+
         csv_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Calculate statistics
         from ..analysis import ClipType
-        
+
         total_clips = len(analyses)
         total_duration = sum(a.duration for a in analyses)
         total_size = sum(self.get_file_size(a.file_path) for a in analyses)
         syncable_count = sum(1 for a in analyses if a.is_syncable)
-        
+
         # Count by type
         type_counts = {}
         for analysis in analyses:
             clip_type = analysis.clip_type.value
             type_counts[clip_type] = type_counts.get(clip_type, 0) + 1
-        
+
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            
+
             # Write summary
             writer.writerow(['Report Generated', datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
             writer.writerow([])
+
+            # Safe to format section
+            if safe_to_format_status:
+                writer.writerow(['SAFE TO FORMAT STATUS'])
+                writer.writerow(['Status', safe_to_format_status['badge']])
+                writer.writerow(['Safe to Format', 'YES' if safe_to_format_status['safe'] else 'NO'])
+                writer.writerow(['Reason', safe_to_format_status['reason']])
+                writer.writerow(['Verified Files', safe_to_format_status['verified_count']])
+                writer.writerow(['Failed Files', safe_to_format_status['failed_count']])
+                writer.writerow([])
+
             writer.writerow(['Summary Statistics'])
             writer.writerow(['Total Clips', total_clips])
             writer.writerow(['Total Duration', self.format_duration(total_duration)])
@@ -491,6 +504,6 @@ class CSVReportGenerator:
             writer.writerow(['Type', 'Count'])
             for clip_type, count in sorted(type_counts.items()):
                 writer.writerow([clip_type.replace('_', ' ').title(), count])
-        
+
         self.logger.info(f"Summary CSV generated: {csv_path}")
         return csv_path

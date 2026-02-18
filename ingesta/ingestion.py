@@ -62,6 +62,77 @@ class IngestionJob:
     def total_bytes(self) -> int:
         return sum(f.file_size for f in self.files_processed if f.success)
     
+    @property
+    def is_safe_to_format(self) -> bool:
+        """
+        Determine if the source media is safe to format.
+        
+        Returns True only if:
+        - All files were copied successfully
+        - All files passed checksum verification
+        - No failures occurred
+        """
+        if not self.files_processed:
+            return False
+        
+        # Check if all files succeeded and were verified
+        for result in self.files_processed:
+            if not result.success:
+                return False
+            if self.verify and not result.verified:
+                return False
+        
+        return True
+    
+    @property
+    def safe_to_format_status(self) -> dict:
+        """
+        Get detailed safe to format status with reasons.
+        
+        Returns dict with:
+        - safe: bool - Whether safe to format
+        - badge: str - Badge text for display
+        - reason: str - Explanation
+        - verified_count: int - Number of verified files
+        - failed_count: int - Number of failed files
+        """
+        total = len(self.files_processed)
+        verified = sum(1 for f in self.files_processed if f.verified)
+        failed = sum(1 for f in self.files_processed if not f.success)
+        
+        if self.is_safe_to_format:
+            return {
+                'safe': True,
+                'badge': '✓ SAFE TO FORMAT',
+                'reason': f'All {total} files successfully copied and verified with {self.checksum_algorithm}',
+                'verified_count': verified,
+                'failed_count': failed,
+            }
+        elif failed > 0:
+            return {
+                'safe': False,
+                'badge': '✗ DO NOT FORMAT',
+                'reason': f'{failed} file(s) failed to copy or verify',
+                'verified_count': verified,
+                'failed_count': failed,
+            }
+        elif self.verify and verified < total:
+            return {
+                'safe': False,
+                'badge': '⚠ DO NOT FORMAT',
+                'reason': f'Only {verified}/{total} files verified',
+                'verified_count': verified,
+                'failed_count': failed,
+            }
+        else:
+            return {
+                'safe': False,
+                'badge': '✗ DO NOT FORMAT',
+                'reason': 'Verification not completed',
+                'verified_count': verified,
+                'failed_count': failed,
+            }
+    
     def to_dict(self) -> Dict:
         """Convert job to dictionary for serialization."""
         return {

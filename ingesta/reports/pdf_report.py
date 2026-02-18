@@ -104,6 +104,44 @@ class PDFReportGenerator:
             textColor=colors.HexColor('#2c5aa0')
         ))
     
+    def _create_safe_to_format_badge(self, status: dict) -> Table:
+        """Create a visual SAFE TO FORMAT badge."""
+        from reportlab.lib.colors import HexColor
+        
+        if status['safe']:
+            bg_color = HexColor('#28a745')  # Green
+            text_color = colors.whitesmoke
+            badge_text = '✓ SAFE TO FORMAT'
+        else:
+            bg_color = HexColor('#dc3545')  # Red
+            text_color = colors.whitesmoke
+            badge_text = '✗ DO NOT FORMAT'
+        
+        # Create badge table
+        badge_data = [
+            [Paragraph(f"<b>{badge_text}</b>", self.styles['CoverTitle'])],
+            [Paragraph(status['reason'], self.styles['CoverSubtitle'])],
+            [Paragraph(f"Verified: {status['verified_count']} | Failed: {status['failed_count']}", 
+                      self.styles['ClipInfo'])],
+        ]
+        
+        badge_table = Table(badge_data, colWidths=[5.0 * inch])
+        badge_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+            ('TEXTCOLOR', (0, 0), (-1, 0), text_color),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (0, 0), 16),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('BOX', (0, 0), (-1, -1), 2, colors.black),
+            ('ROUNDEDCORNERS', (0, 0), (-1, -1), 8),
+        ]))
+        
+        return badge_table
+    
     def format_duration(self, seconds: float) -> str:
         """Format duration as MM:SS or HH:MM:SS."""
         if seconds < 3600:
@@ -170,12 +208,17 @@ class PDFReportGenerator:
         
         return elements
     
-    def create_summary_section(self, analyses: List[ClipAnalysis]) -> List[Any]:
+    def create_summary_section(self, analyses: List[ClipAnalysis], safe_to_format_status: Optional[dict] = None) -> List[Any]:
         """Create the summary statistics section."""
         elements = []
         
         elements.append(Paragraph("Summary Statistics", self.styles['SummaryTitle']))
         elements.append(Spacer(1, 0.2 * inch))
+        
+        # Add SAFE TO FORMAT badge if status provided
+        if safe_to_format_status:
+            elements.append(self._create_safe_to_format_badge(safe_to_format_status))
+            elements.append(Spacer(1, 0.2 * inch))
         
         # Calculate statistics
         total_clips = len(analyses)
@@ -341,15 +384,17 @@ class PDFReportGenerator:
     
     def generate_report(self, analyses: List[ClipAnalysis],
                        thumbnails: Optional[Dict[Path, List[Path]]] = None,
-                       output_path: Optional[Path] = None) -> Path:
+                       output_path: Optional[Path] = None,
+                       safe_to_format_status: Optional[dict] = None) -> Path:
         """
         Generate PDF report from clip analyses.
-        
+
         Args:
             analyses: List of ClipAnalysis objects
             thumbnails: Optional dict mapping video paths to thumbnail paths
             output_path: Override output path
-            
+            safe_to_format_status: Optional status dict from ingestion job
+
         Returns:
             Path to generated PDF file
         """
@@ -381,7 +426,7 @@ class PDFReportGenerator:
         elements.extend(self.create_cover_page())
         
         # Summary section
-        elements.extend(self.create_summary_section(analyses))
+        elements.extend(self.create_summary_section(analyses, safe_to_format_status))
         
         # Individual clip sections
         elements.append(Paragraph("Clip Details", self.styles['Heading1']))

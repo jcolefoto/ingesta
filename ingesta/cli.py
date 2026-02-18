@@ -141,6 +141,17 @@ def ingest(ctx, source, dest, checksum, verify, log_file, include, exclude, repo
         click.echo(f"  Failed: {job.failure_count}")
         click.echo(f"  Total size: {job.total_bytes / (1024**3):.2f} GB")
         
+        # Display SAFE TO FORMAT badge
+        safe_status = job.safe_to_format_status
+        click.echo(f"\n{'=' * 50}")
+        if safe_status['safe']:
+            click.echo(click.style(f"  {safe_status['badge']}", fg='green', bold=True))
+        else:
+            click.echo(click.style(f"  {safe_status['badge']}", fg='red', bold=True))
+        click.echo(f"  {safe_status['reason']}")
+        click.echo(f"  Verified: {safe_status['verified_count']} | Failed: {safe_status['failed_count']}")
+        click.echo(f"{'=' * 50}")
+        
         # Track in project if specified
         if project:
             pm = get_project_manager()
