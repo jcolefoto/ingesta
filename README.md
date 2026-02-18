@@ -458,6 +458,13 @@ Options:
   --tolerance FLOAT   Sync tolerance in seconds (default: 0.5)
   --prefix TEXT       Prefix for output filenames
   --sync-source TEXT  Sync source: auto, timecode, waveform (prompted if not specified)
+
+Sync Sources:
+  auto        Automatically detect best sync method (recommended)
+  timecode    Use SMPTE timecode (HH:MM:SS:FF) for synchronization
+              The primary audio mixing timecode format used by audio engineers
+              who jam sync devices on set
+  waveform    Use audio waveform matching via cross-correlation
 ```
 
 ### Premiere Command

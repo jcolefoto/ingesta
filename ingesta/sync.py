@@ -1,7 +1,15 @@
 """
-Audio-video synchronization using waveform matching.
+Audio-video synchronization using waveform matching and SMPTE timecode.
 
-Provides Pluralize-style audio sync capabilities.
+The primary audio mixing timecode format is SMPTE timecode (Society of Motion
+Picture and Television Engineers). It is a sequence of numbers identifying
+hours, minutes, seconds, and frames (HH:MM:SS:FF) used to synchronize audio,
+video, and DAW software.
+
+Provides sync capabilities via:
+- Waveform matching: Cross-correlation of audio waveforms
+- SMPTE timecode: Embedded timecode metadata (when available)
+- Auto detection: Automatically selects best available method
 """
 
 import logging
@@ -270,8 +278,11 @@ class WaveformSync:
                 result.success = True
                 
             elif method == "timecode":
-                # TODO: Implement timecode-based sync
-                result.error_message = "Timecode sync not yet implemented"
+                # TODO: Implement SMPTE timecode-based sync
+                # SMPTE timecode format: HH:MM:SS:FF (hours, minutes, seconds, frames)
+                # Used by audio engineers to jam sync devices on set
+                # Requires extracting LTC from audio tracks or embedded metadata
+                result.error_message = "SMPTE timecode sync not yet implemented"
                 
             else:
                 result.error_message = f"Unknown sync method: {method}"
